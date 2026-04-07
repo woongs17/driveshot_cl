@@ -1,0 +1,1838 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style id="camera-rotate-style"></style>
+    <title>드라이브 슛 - 디월트 테마 최종 통합 마스터 (전수 검수 완료)</title>
+    <!-- 외부 라이브러리 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- 구글 API -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <!-- 이미지 합성용 (HTML 요소를 캔버스로 변환) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        
+        /* [DeWalt Style Color Palette] */
+        :root {
+            --gunmetal: #2D2D2D;
+            --orange: #FF8C00;
+            --yellow: #FFD700;
+        }
+
+        body { 
+            font-family: 'Pretendard', sans-serif; 
+            background-color: #0f172a; 
+            margin: 0; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+        }
+        
+        .mobile-frame { 
+            width: 375px; height: 812px; background-color: #000; border-radius: 44px; 
+            position: relative; overflow: hidden; display: flex; flex-direction: column; 
+            border: 8px solid #334155; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); 
+        }
+        .notch { 
+            position: absolute; top: 0; left: 50%; transform: translateX(-50%); 
+            width: 150px; height: 32px; background-color: #334155; 
+            border-bottom-left-radius: 20px; border-bottom-right-radius: 20px; z-index: 250; 
+        }
+
+        /* 보드판 편집기 - 넓은 간격 + 스크롤 복구 */
+        .board-editor { 
+            background-color: #ffffff; 
+            border: 3px solid var(--gunmetal); border-radius: 12px; margin: 0 10px; 
+            overflow-x: hidden; z-index: 50; flex-shrink: 0;
+            display: flex; flex-direction: column;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            max-height: 280px; overflow-y: auto;
+        }
+        .board-editor::-webkit-scrollbar { width: 6px; }
+        .board-editor::-webkit-scrollbar-thumb { background: var(--gunmetal); border-radius: 10px; border: 1px solid #ffffff; }
+
+        .stamp-row { display: flex; border-bottom: 1px solid #f1f5f9; min-height: 56px; align-items: stretch; position: relative; }
+        .stamp-row:last-child { border-bottom: none; }
+        
+        .stamp-label { 
+            width: 80px; background-color: var(--gunmetal); color: var(--yellow); 
+            font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; position: relative; overflow: hidden; transition: background-color 0.2s;
+        }
+        /* 역할별 라벨 배경색 (왼쪽 30% 색 블록 대신 전체 배경 변경) */
+        .stamp-label.role-folder { background-color: #dc2626; color: #fff; }
+        .stamp-label.role-file1  { background-color: #2563eb; color: #fff; }
+        .stamp-label.role-file2  { background-color: #16a34a; color: #fff; }
+        /* 역할 뱃지 - 라벨 하단에 작은 텍스트 */
+        .role-badge {
+            position: absolute; bottom: 2px; left: 0; right: 0;
+            text-align: center; font-size: 8px; font-weight: 900;
+            opacity: 0.85; letter-spacing: 0.05em;
+        }
+        .stamp-value { 
+            flex: 1; padding: 0 12px; color: #111827; font-weight: 700; font-size: 15px; 
+            display: flex; align-items: center; justify-content: flex-start; background: white;
+            cursor: pointer; white-space: nowrap; overflow-x: auto;
+        }
+
+        /* 컨트롤 조작 그룹 */
+        .action-group { display: flex; align-items: stretch; }
+        .rotate-trigger { width: 38px; display: flex; align-items: center; justify-content: center; background-color: #f5f3ff; color: #7C4DFF; cursor: pointer; border-left: 1px solid #ddd6fe; }
+        .del-btn { width: 34px; display: flex; align-items: center; justify-content: center; background-color: #fff1f2; color: #f43f5e; cursor: pointer; border-left: 1px solid #ffe4e6; }
+        .reorder-btns { display: flex; flex-direction: column; width: 32px; border-left: 1px solid #f1f5f9; background: #fafafa; }
+        .reorder-btn { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #cbd5e1; cursor: pointer; }
+
+        /* 스마트 툴바 - 녹색 표시 영역 복구 */
+        .smart-toolbar {
+            display: flex; align-items: center;
+            margin: 8px 10px 0; padding: 6px 8px; background: rgba(45, 45, 45, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; z-index: 100; flex-shrink: 0;
+            gap: 5px; height: 58px; position: relative;
+        }
+        .btn-action { height: 42px; padding: 0 10px; border-radius: 10px; font-weight: 800; font-size: 11px; transition: all 0.2s; display: flex; align-items: center; gap: 4px; shrink: 0; }
+        .btn-template { background-color: var(--gunmetal); color: var(--yellow); }
+        .btn-edit { background-color: #475569; color: white; }
+        .btn-edit.active { background-color: var(--orange); }
+        .btn-plus { background-color: var(--orange); color: white; }
+
+        /* 스케일 및 적용 버튼 통합 */
+        .scale-save-group {
+            display: flex; align-items: center; background: rgba(0,0,0,0.5); border-radius: 12px;
+            padding: 2px; flex: 1; min-width: 150px; justify-content: space-between; border: 1px solid rgba(255,255,255,0.1);
+        }
+        .scale-btn { width: 34px; height: 38px; display: flex; align-items: center; justify-content: center; color: white; border-radius: 10px; transition: all 0.1s; font-size: 16px; }
+        .scale-value-box { background: white; color: var(--gunmetal); padding: 2px 6px; border-radius: 8px; font-weight: 800; font-size: 12px; min-width: 42px; text-align: center; border: 1.5px solid var(--yellow); }
+        .btn-inline-save { background-color: var(--orange); color: white; padding: 0 8px; height: 38px; border-radius: 10px; font-weight: 900; font-size: 10px; display: flex; align-items: center; gap: 3px; shrink: 0; margin-left: 2px; }
+
+        /* 사진 위 가이드 눈금 */
+        .scale-guide {
+            position: absolute; top: 10px; left: 15px; right: 15px; 
+            display: flex; justify-content: space-between; pointer-events: none; z-index: 55;
+            opacity: 0.6;
+        }
+        .guide-num { font-size: 12px; font-weight: 900; color: var(--yellow); text-shadow: 0 0 4px black; }
+
+        /* 띠용 마커 */
+        @keyframes marker-boing {
+            0%, 100% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.15); opacity: 1; }
+        }
+        .pos-square {
+            position: absolute; width: 50px; height: 50px; border: 3.5px solid var(--yellow);
+            border-radius: 14px; pointer-events: auto; display: flex; align-items: center; justify-content: center;
+            color: var(--yellow); font-size: 13px; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 70;
+            animation: marker-boing 1.5s ease-in-out infinite;
+        }
+
+        .workspace-area {
+            flex: 1; margin: 15px 10px 0; border: none; border-radius: 0;
+            display: flex; flex-direction: column; overflow: hidden; position: relative;
+            background-color: #111827; cursor: pointer; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            max-height: 45%;
+            aspect-ratio: 4/3; /* 기본 가로 비율 */
+        }
+
+        .image-preview-container { flex: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .preview-img { width: 100%; height: 100%; object-fit: cover; }
+
+        /* 공문서용 삽입 보드판 */
+        .overlay-board {
+            position: absolute; 
+            width: auto; 
+            background: #ffffff; 
+            border: 1.5px solid #000000; 
+            padding: 0;
+            pointer-events: none; 
+            z-index: 60;
+        }
+        /* 보드판 위치 - 모서리에 빈공간 없이 딱 붙게 */
+        .pos-tl { top: 0; left: 0; transform-origin: top left; }
+        .pos-tr { top: 0; right: 0; transform-origin: top right; }
+        .pos-bl { bottom: 0; left: 0; transform-origin: bottom left; }
+        .pos-br { bottom: 0; right: 0; transform-origin: bottom right; }
+
+        .overlay-row { 
+            display: flex; 
+            border-bottom: 1px solid #000000; 
+            height: 28px;
+        }
+        .overlay-row:last-child { border-bottom: none; }
+        .overlay-label { 
+            width: 55px; 
+            background: #ffffff; 
+            color: #000000; 
+            font-weight: 700; 
+            font-size: 11px; 
+            border-right: 1px solid #000000; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .overlay-value { 
+            flex: 1; 
+            color: #000000; 
+            font-weight: 500; 
+            font-size: 12px; 
+            padding: 0 8px;
+            display: flex; 
+            align-items: center;
+            white-space: nowrap;
+            background: #ffffff;
+            min-width: 0;
+        }
+
+        /* 하단 조작부 */
+        .bottom-ctrl-box {
+            padding: 0 30px 25px;
+            background: linear-gradient(to top, rgba(0,0,0,1) 0%, transparent 100%);
+            display: flex; justify-content: space-between; align-items: center;
+            z-index: 100; flex-shrink: 0;
+        }
+        .shutter-btn {
+            width: 105px; height: 105px; background-color: var(--orange); border-radius: 50%;
+            border: 7px solid #fff; shadow: 0 10px 30px rgba(255, 140, 0, 0.5);
+            display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+        }
+        .shutter-inner { width: 80px; height: 80px; background: #fff; border-radius: 50%; border: 4px solid #eee; }
+
+        /* 성공 알림 토스트 */
+        .toast-center {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 600; background: rgba(45, 45, 45, 0.95); color: white; padding: 25px 40px;
+            border-radius: 24px; font-weight: 700; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+            border: 2px solid var(--orange); animate-in zoom-in duration-300;
+        }
+
+        /* [복구] 설정창 스타일 - 빨간색 표시 항목 완벽 재현 */
+        #view-settings {
+            position: absolute; inset: 0; background-color: #f1f5f9; z-index: 500; display: flex; flex-direction: column;
+        }
+        .settings-header { 
+            padding: 55px 24px 20px; background-color: var(--gunmetal); color: var(--yellow); 
+            display: flex; items-center; justify-content: space-between;
+        }
+        .settings-section { padding: 20px 24px; overflow-y: auto; flex: 1; }
+        .settings-card-group { background: white; border-radius: 28px; padding: 15px; border: 1px solid #e2e8f0; margin-bottom: 20px; }
+        
+        .radio-card { 
+            display: flex; flex-direction: column; padding: 16px; border: 2.5px solid #f1f5f9; border-radius: 20px; margin-bottom: 12px; 
+            cursor: pointer; transition: all 0.2s; position: relative;
+        }
+        .radio-card.active { border-color: var(--orange); background: #fffbeb; }
+        .radio-check { position: absolute; top: 18px; right: 18px; color: var(--orange); opacity: 0; transition: 0.2s; }
+        .radio-card.active .radio-check { opacity: 1; }
+        
+        .radio-card-btn { position: absolute; top: 18px; right: 18px; background: #f1f5f9; color: #475569; font-size: 9px; font-weight: 800; padding: 5px 10px; border-radius: 8px; border: 1.5px solid #e2e8f0; active:scale-95 transition-all; }
+
+        .settings-title { font-size: 12px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; padding-left: 8px; }
+        
+        /* 토글 스위치 */
+        .switch-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 4px; }
+        .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px; }
+        .toggle-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .toggle-slider { background-color: var(--orange); }
+        input:checked + .toggle-slider:before { transform: translateX(20px); }
+
+        .usage-container { background: var(--gunmetal); border-radius: 24px; padding: 20px; color: white; margin-bottom: 20px; }
+        .usage-bar-bg { width: 100%; height: 10px; background: rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden; margin: 15px 0; }
+        .usage-bar-fill { height: 100%; background: linear-gradient(to right, var(--yellow), var(--orange)); border-radius: 10px; }
+
+        /* 모달 시스템 */
+        .modal-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); z-index: 600; display: flex; flex-direction: column; justify-content: flex-start; padding-top: 30px; }
+        .modal-content { background: white; border-radius: 0 0 30px 30px; padding: 25px; max-height: 85%; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,0.7); overflow: hidden; }
+        .date-picker-input { width: 100%; padding: 15px; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 16px; font-weight: 700; font-size: 16px; color: #1e293b; outline: none; }
+        
+        /* 퀵 버튼 편집 펜 아이콘 */
+        .quick-edit-icon { position: absolute; top: 4px; right: 6px; font-size: 8px; color: #cbd5e1; opacity: 0.6; }
+        .quick-edit-icon:hover { color: var(--orange); opacity: 1; }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .view-hidden { display: none !important; }
+        
+        /* 합성 캡처 시 숨길 요소 */
+        .capturing .cancel-guide,
+        .capturing .pos-square,
+        .capturing .scale-guide,
+        .capturing .pos-preselector,
+        .capturing .capture-hide { display: none !important; }
+
+        /* cancel-guide - 캡처 중 항상 숨김 (별도 클래스로 확실히) */
+        .hide-on-capture { transition: opacity 0.2s; }
+        .capturing .hide-on-capture { opacity: 0 !important; pointer-events: none !important; }
+
+        /* 보드판 항상 사진 안에 완전히 표시 */
+        .overlay-board.pos-tl { top: 4px !important; left: 4px !important; bottom: auto !important; right: auto !important; }
+        .overlay-board.pos-tr { top: 4px !important; right: 4px !important; bottom: auto !important; left: auto !important; }
+        .overlay-board.pos-bl { bottom: 4px !important; left: 4px !important; top: auto !important; right: auto !important; }
+        .overlay-board.pos-br { bottom: 4px !important; right: 4px !important; top: auto !important; left: auto !important; }
+
+        /* 세로 슬라이더 */
+        input[type=range][style*="vertical"] {
+            -webkit-appearance: slider-vertical;
+            appearance: slider-vertical;
+        }
+        input[type=range] { accent-color: #FF8C00; }
+
+        /* 카메라 화면 가로 모드 */
+        .camera-landscape {
+            position: absolute; inset: 0; background: #000;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .camera-landscape video {
+            width: 100%; height: 100%; object-fit: cover;
+        }
+        
+        /* 양식 관리 리스트 */
+        .template-item {
+            display: flex; flex-direction: column;
+            background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 20px;
+            padding: 18px; margin-bottom: 15px; transition: all 0.2s; cursor: pointer; text-align: left;
+        }
+        .template-item.active { border-color: var(--orange); background: #fffbeb; }
+        .template-actions { display: flex; gap: 10px; margin-top: 15px; border-top: 1.5px solid #f1f5f9; padding-top: 12px; }
+        .btn-t-action { flex: 1; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 13px; gap: 6px; font-weight: 800; shadow: 0 2px 5px rgba(0,0,0,0.05); active:scale-95 transition-all; }
+        .btn-t-update { background: #e0f2fe; color: #0ea5e9; }
+        .btn-t-delete { background: #fff1f2; color: #f43f5e; }
+        .btn-t-qr { background: #f1f5f9; color: var(--gunmetal); border: 1.5px solid #e2e8f0; }
+        
+        .recommend-tag { background: #fee2e2; color: #ef4444; font-size: 8px; font-weight: 800; padding: 1px 5px; border-radius: 4px; margin-left: 5px; }
+
+        .add-menu-container {
+            position: absolute; left: 10px; bottom: 65px; background: white; border-radius: 16px; 
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6); z-index: 550; border: 1px solid #e2e8f0;
+            width: 160px; overflow: hidden;
+        }
+        .add-menu-item { 
+            width: 100%; text-align: left; padding: 14px 18px; font-weight: 700; 
+            font-size: 13px; border-bottom: 1px solid #f1f5f9; display: flex; 
+            align-items: center; gap: 10px; color: #334155;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        /*
+         * ========== 드라이브 슛 - 기능 설명 (초보자용) ==========
+         *
+         * [1] 사진 불러오기
+         *   - 작업 영역(검은 화면)을 클릭하거나, 하단의 "Load" 버튼을 누르면
+         *     갤러리에서 사진을 고르거나 카메라로 찍을 수 있습니다.
+         *
+         * [2] 보드판 편집
+         *   - 위쪽 노란/검정 보드판에서 공사명, 공종, 위치 등을 수정할 수 있습니다.
+         *   - 각 항목을 클릭하면 선택 창이 뜹니다.
+         *   - +/- 버튼으로 보드판 크기를 조절하고, 모서리 아이콘으로 위치를 바꿀 수 있습니다.
+         *
+         * [3] 적용 버튼 (핵심!)
+         *   - "적용" 버튼을 누르면 → 사진과 보드판이 하나의 이미지로 합쳐집니다.
+         *   - 합쳐진 이미지는 브라우저(IndexedDB)에 임시 저장됩니다.
+         *   - 새로고침해도 저장된 이미지는 유지됩니다.
+         *
+         * [4] 구글 드라이브에 올리기
+         *   - 하단 "Sync" 버튼을 누르면 저장된 이미지 목록이 뜹니다.
+         *   - "다운로드" → PC/폰에 파일 저장
+         *   - "Drive에 업로드" → 구글 드라이브 페이지가 열리면, 다운로드한 파일을 끌어다 놓으면 됩니다.
+         *
+         */
+        /* ===== 구글 드라이브 실제 연동 설정 ===== */
+        const GOOGLE_CLIENT_ID = '986985952258-hp9bstq1c75d7f1fsuadrmcd0o7fhagj.apps.googleusercontent.com';
+        const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+        /* ===== 구글 액세스 토큰 발급 ===== */
+        const getAccessToken = () => new Promise((resolve, reject) => {
+            const tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: GOOGLE_CLIENT_ID,
+                scope: DRIVE_SCOPE,
+                callback: (resp) => {
+                    if (resp.error) reject(resp);
+                    else resolve(resp.access_token);
+                }
+            });
+            tokenClient.requestAccessToken({ prompt: '' });
+        });
+
+        /* ===== 구글 드라이브: 폴더 찾기 또는 만들기 ===== */
+        const getOrCreateFolder = async (token, folderName, parentId = null) => {
+            // 이미 있는 폴더 찾기
+            const q = parentId
+                ? `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`
+                : `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false`;
+            const searchRes = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`,
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            const searchData = await searchRes.json();
+            if (searchData.files && searchData.files.length > 0) return searchData.files[0].id;
+
+            // 없으면 새로 만들기
+            const meta = { name: folderName, mimeType: 'application/vnd.google-apps.folder' };
+            if (parentId) meta.parents = [parentId];
+            const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(meta)
+            });
+            const createData = await createRes.json();
+            return createData.id;
+        };
+
+        /* ===== 구글 드라이브: 실제 파일 업로드 ===== */
+        const uploadToDrive = async (token, blob, filename, folderId) => {
+            const metadata = { name: filename, parents: [folderId] };
+            const form = new FormData();
+            form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            form.append('file', blob);
+            const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+                body: form
+            });
+            return await res.json();
+        };
+
+        const { useState, useEffect, useRef } = React;
+
+        const App = () => {
+            const [view, setView] = useState('main'); 
+            
+            // 보드판 상태
+            const [fields, setFields] = useState([
+                { id: 1, label: '공사명', value: '수원 골드스테이션 전기 공사 완료 건', type: 'text', color: '#2D2D2D', quick: ['수원 현장', '동탄 파크뷰', '평택 스마트'], history: ['판교 테크노밸리'], nameRole: 'folder' },
+                { id: 2, label: '공 종', value: '전기 설비 공사', type: 'text', color: '#2D2D2D', quick: ['전기 공사', '설비 공사', '소방 공사'], history: ['기초 토목'], nameRole: 'file1' },
+                { id: 3, label: '위 치', value: '101동 203호 안방', type: 'text', color: '#2D2D2D', quick: ['101동', '지하 1층', '외부 옹벽'], history: ['전기실 내부'], nameRole: 'file2' },
+                { id: 4, label: '날 짜', value: new Date().toISOString().split('T')[0], type: 'date', color: '#2D2D2D', quick: [], history: [], nameRole: null },
+                { id: 5, label: '내 용', value: '시공 후', type: 'stage', color: '#FF8C00', quick: ['시공 전', '시공 중', '시공 후'], history: [], nameRole: null }
+            ]);
+
+            const [images, setImages] = useState([]);
+            const [boardScale, setBoardScale] = useState(0.5); 
+            const [boardPos, setBoardPos] = useState('pos-bl');
+            const [showModal, setShowModal] = useState(false);
+            const [showTemplateModal, setShowTemplateModal] = useState(false);
+            const [activeFieldId, setActiveFieldId] = useState(null);
+            const [showToast, setShowToast] = useState(false);
+            const [toastMsg, setToastMsg] = useState("");
+            const [isEditMode, setIsEditMode] = useState(false);
+            const [user, setUser] = useState(null);
+            const [accessToken, setAccessToken] = useState(null);
+            const [isUploading, setIsUploading] = useState(false);
+            const [uploadProgress, setUploadProgress] = useState('');
+            const [selectedFolder, setSelectedFolder] = useState("");
+            const [showAddMenu, setShowAddMenu] = useState(false);
+            const [storageLoc, setStorageLoc] = useState('mine');
+            const [wifiOnly, setWifiOnly] = useState(true);
+            const [imageQuality, setImageQuality] = useState('normal'); // 'normal'(1024) or 'high'(2048)
+            const [aspectRatio, setAspectRatio] = useState('4:3');     // '1:1' | '4:3' | '16:9'
+
+            // 비율별 실제 출력 해상도 (가로 기준)
+            const RESOLUTIONS = {
+                'normal': { '1:1': [1300,1300], '4:3': [2000,1500], '16:9': [1920,1080] },
+                'high':   { '1:1': [2600,2600], '4:3': [4000,3000], '16:9': [3840,2160] }
+            };
+            const [showQR, setShowQR] = useState(false);
+            const [activeTemplate, setActiveTemplate] = useState(null);
+            const [isEditingQuick, setIsEditingQuick] = useState(null);
+            const [savedImages, setSavedImages] = useState([]);  // 브라우저에 임시 저장된 합성 이미지 목록
+            const [isCapturing, setIsCapturing] = useState(false);  // 합성 중 로딩 표시용
+            const [showSavedGallery, setShowSavedGallery] = useState(false);  // 저장된 이미지 갤러리 모달
+            const [showHelp, setShowHelp] = useState(false);  // 도움말 모달
+            const [roleMenuFieldId, setRoleMenuFieldId] = useState(null);  // 라벨 역할 선택 메뉴 대상
+
+            const fileInputRef = useRef(null);
+            const cameraInputRef = useRef(null);       // 카메라 직접 촬영용
+            const captureContainerRef = useRef(null);  // 합성할 영역 (사진+보드판)
+            const labelPressTimerRef = useRef(null);   // 라벨 롱프레스 타이머
+            const labelPressTriggeredRef = useRef(false); // 롱프레스 발생 여부
+            const [cameraMode, setCameraMode] = useState(false); // 카메라 실시간 미리보기 모드
+            const [stream, setStream] = useState(null); // 카메라 스트림
+            const videoRef = useRef(null); // 비디오 엘리먼트
+
+            /* ===== IndexedDB: 브라우저에 이미지 임시 저장 ===== */
+            const DB_NAME = 'DriveShootDB';
+            const STORE_NAME = 'combinedImages';
+
+            const openDB = () => new Promise((resolve, reject) => {
+                const req = indexedDB.open(DB_NAME, 1);
+                req.onerror = () => reject(req.error);
+                req.onsuccess = () => resolve(req.result);
+                req.onupgradeneeded = (e) => { e.target.result.createObjectStore(STORE_NAME, { keyPath: 'id' }); };
+            });
+
+            const saveToDB = async (blob, filename, folderName, baseName) => {
+                const db = await openDB();
+                const item = { id: Date.now(), blob, filename, folderName, baseName, createdAt: new Date().toISOString() };
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(STORE_NAME, 'readwrite');
+                    tx.objectStore(STORE_NAME).put(item);
+                    tx.oncomplete = () => resolve(item.id);
+                    tx.onerror = () => reject(tx.error);
+                });
+            };
+
+            const loadAllFromDB = async () => {
+                const db = await openDB();
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(STORE_NAME, 'readonly');
+                    const req = tx.objectStore(STORE_NAME).getAll();
+                    req.onsuccess = () => resolve(req.result || []);
+                    req.onerror = () => reject(req.error);
+                });
+            };
+
+            const deleteFromDB = async (id) => {
+                const db = await openDB();
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(STORE_NAME, 'readwrite');
+                    tx.objectStore(STORE_NAME).delete(id);
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => reject(tx.error);
+                });
+            };
+
+            const downloadBlob = (blob, filename) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            /* ===== 폰 갤러리에 자동 저장 ===== */
+            const saveToGallery = (blob, filename) => {
+                try {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                } catch(e) {
+                    console.warn('갤러리 저장 실패:', e);
+                }
+            };
+
+            useEffect(() => { loadAllFromDB().then(setSavedImages); }, []);
+
+            /* ===== 파일/폴더 이름 규칙 계산 ===== */
+            const getNamingInfo = () => {
+                const folderField = fields.find(f => f.nameRole === 'folder');
+                const file1Field = fields.find(f => f.nameRole === 'file1');
+                const file2Field = fields.find(f => f.nameRole === 'file2');
+                const dateField = fields.find(f => f.type === 'date');
+
+                const folderNameRaw = (folderField?.value || '').trim();
+                const folderName = folderNameRaw || '미지정_폴더';
+
+                const workRaw = (file1Field?.value || '작업명').trim();
+                // 공종은 파일명에서 공백 제거
+                const work = workRaw.replace(/\s+/g, '');
+                const location = (file2Field?.value || '위치').trim() || '위치';
+                const dateValue = (dateField?.value || new Date().toISOString().slice(0,10)).trim();
+
+                const base = `${work}_${location}_${dateValue}`;
+
+                // 이미 저장된 파일 중 같은 베이스 이름을 가진 것들의 최대 번호를 찾음
+                let maxIndex = 0;
+                savedImages.forEach(item => {
+                    if (!item.filename) return;
+                    if (!item.filename.startsWith(base + '_') || !item.filename.toLowerCase().endsWith('.jpg')) return;
+                    const between = item.filename.slice(base.length + 1, -4); // "_01"에서 숫자 부분
+                    const n = parseInt(between, 10);
+                    if (!isNaN(n) && n > maxIndex) maxIndex = n;
+                });
+
+                const nextIndex = String(maxIndex + 1).padStart(2, '0');
+                const filename = `${base}_${nextIndex}.jpg`;
+
+                return { folderName, base, index: nextIndex, filename };
+            };
+
+            /* ===== 실제 구글 로그인 (Token Client 방식) ===== */
+            const handleGoogleLogin = () => {
+                try {
+                    const tokenClient = google.accounts.oauth2.initTokenClient({
+                        client_id: GOOGLE_CLIENT_ID,
+                        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
+                        callback: async (resp) => {
+                            if (resp.error) {
+                                setToastMsg("로그인 실패: " + resp.error);
+                                setShowToast(true);
+                                setTimeout(() => setShowToast(false), 3000);
+                                return;
+                            }
+                            // 토큰 저장
+                            setAccessToken(resp.access_token);
+                            // 사용자 정보 가져오기
+                            try {
+                                const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+                                    headers: { Authorization: `Bearer ${resp.access_token}` }
+                                });
+                                const info = await res.json();
+                                setUser({ email: info.email, name: info.name, picture: info.picture });
+                                setToastMsg(`${info.name}님 로그인 완료!`);
+                                setShowToast(true);
+                                setTimeout(() => setShowToast(false), 2500);
+                            } catch(e) {
+                                setUser({ email: 'unknown' });
+                            }
+                        }
+                    });
+                    tokenClient.requestAccessToken({ prompt: 'consent' });
+                } catch(e) {
+                    setToastMsg("구글 API 로딩 중입니다. 잠시 후 다시 시도해주세요.");
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 3000);
+                }
+            };
+
+            const handleLogout = () => {
+                if (accessToken) google.accounts.oauth2.revoke(accessToken);
+                setUser(null);
+                setAccessToken(null);
+                setToastMsg("로그아웃 되었습니다.");
+                setShowToast(true);
+                setTimeout(() => setShowToast(false), 2000);
+            };
+
+            /* ===== 실제 드라이브 업로드 ===== */
+            const handleDriveUpload = async (item) => {
+                try {
+                    setIsUploading(true);
+                    setUploadProgress("구글 로그인 중...");
+
+                    // 토큰 발급
+                    const token = await getAccessToken();
+                    setAccessToken(token);
+
+                    setUploadProgress("폴더 확인 중...");
+
+                    // 최상위 [드라이브샷] 폴더 생성/확인
+                    const rootFolderId = await getOrCreateFolder(token, '드라이브샷');
+
+                    // 현장별 하위 폴더 생성/확인
+                    const subFolderId = await getOrCreateFolder(token, item.folderName || '미지정_현장', rootFolderId);
+
+                    setUploadProgress("업로드 중...");
+
+                    // 실제 파일 업로드
+                    const result = await uploadToDrive(token, item.blob, item.filename, subFolderId);
+
+                    setUploadProgress("");
+                    setIsUploading(false);
+
+                    setToastMsg(`✓ 업로드 완료! ${item.filename}`);
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 3000);
+
+                    // 업로드 완료 후 드라이브 폴더 열기
+                    window.open(`https://drive.google.com/drive/folders/${subFolderId}`, '_blank');
+
+                } catch (err) {
+                    console.error(err);
+                    setIsUploading(false);
+                    setUploadProgress("");
+                    setToastMsg("업로드 실패. 다시 시도해주세요.");
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 3000);
+                }
+            };
+
+            /* ===== 전체 일괄 업로드 ===== */
+            const handleUploadAll = async () => {
+                if (savedImages.length === 0) return;
+                for (const item of savedImages) {
+                    await handleDriveUpload(item);
+                }
+            };
+
+            const handleFileChange = (e) => {
+                const files = Array.from(e.target.files);
+                if (files.length === 0) return;
+                setImages([URL.createObjectURL(files[0])]);
+            };
+
+            /* ===== 스트림 → 비디오 연결 (useEffect로 안정적 처리) ===== */
+            useEffect(() => {
+                if (stream && videoRef.current) {
+                    videoRef.current.srcObject = stream;
+                    videoRef.current.play().catch(err => console.warn('video play error:', err));
+                }
+            }, [stream, cameraMode]);
+
+            /* ===== 카메라 직접 실행 ===== */
+            const startCamera = async () => {
+                try {
+                    // 화면 가로 고정 시도
+                    if (screen.orientation && screen.orientation.lock) {
+                        screen.orientation.lock('landscape').catch(() => {});
+                    }
+                    const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+                    const constraints = {
+                        video: isMobile
+                            ? { 
+                                facingMode: { ideal: 'environment' }, 
+                                width: { ideal: 1920 },
+                                height: { ideal: 1080 },
+                                aspectRatio: { ideal: 16/9 }
+                              }
+                            : { width: { ideal: 1280 }, height: { ideal: 720 } },
+                        audio: false
+                    };
+                    const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    setStream(mediaStream);
+                    setCameraMode(true);
+                } catch (err) {
+                    console.error('카메라 오류:', err);
+                    try {
+                        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                        setStream(fallbackStream);
+                        setCameraMode(true);
+                    } catch (err2) {
+                        setToastMsg("카메라를 사용할 수 없어 갤러리를 엽니다.");
+                        setShowToast(true);
+                        setTimeout(() => setShowToast(false), 2000);
+                        fileInputRef.current.click();
+                    }
+                }
+            };
+
+            /* ===== 카메라로 사진 찍기 → 즉시 합성 → 자동 업로드 ===== */
+            const takePhoto = async () => {
+                if (!videoRef.current) return;
+                const video = videoRef.current;
+                if (video.videoWidth === 0 || video.videoHeight === 0) {
+                    setToastMsg("카메라 준비 중입니다. 잠시 후 다시 시도해주세요.");
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 2000);
+                    return;
+                }
+
+                // 1. 비디오 프레임 캡처 (항상 가로 기준으로)
+                const vw = video.videoWidth;
+                const vh = video.videoHeight;
+                const videoCanvas = document.createElement('canvas');
+
+                // 세로로 찍혔으면 가로로 회전 (반시계방향 -90도)
+                if (vh > vw) {
+                    videoCanvas.width = vh;
+                    videoCanvas.height = vw;
+                    const ctx = videoCanvas.getContext('2d');
+                    ctx.translate(0, vw);
+                    ctx.rotate(-Math.PI / 2);
+                    ctx.drawImage(video, 0, 0, vw, vh);
+                } else {
+                    videoCanvas.width = vw;
+                    videoCanvas.height = vh;
+                    videoCanvas.getContext('2d').drawImage(video, 0, 0);
+                }
+                const photoUrl = videoCanvas.toDataURL('image/jpeg', 0.95);
+
+                // 2. 카메라 끄고 사진 세팅
+                stopCamera();
+                setImages([photoUrl]);
+
+                // 3. 합성 + 업로드 후 카메라 자동 재시작
+                setToastMsg("📸 촬영 완료! 저장 중...");
+                setShowToast(true);
+
+                setTimeout(async () => {
+                    await triggerApplyAndUpload();
+                    // 합성/업로드 완료 후 바로 카메라 다시 열기
+                    setTimeout(() => {
+                        setImages([]);
+                        startCamera();
+                    }, 500);
+                }, 600);
+            };
+
+            /* ===== 합성 + 드라이브 자동 업로드 (원스텝) ===== */
+            const triggerApplyAndUpload = async () => {
+                setIsCapturing(true);
+                await new Promise(r => setTimeout(r, 400));
+
+                const container = captureContainerRef.current;
+                if (!container || typeof html2canvas !== 'function') {
+                    setToastMsg("합성 준비 중... 다시 시도해주세요.");
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 2000);
+                    setIsCapturing(false);
+                    return;
+                }
+                const naming = getNamingInfo();
+                const [outW, outH] = RESOLUTIONS[imageQuality][aspectRatio];
+                // container 실제 크기 기준으로 scale 계산
+                const cw = container.offsetWidth;
+                const ch = container.offsetHeight;
+                const scaleVal = Math.max(outW / cw, outH / ch);
+                try {
+                    // html2canvas는 container 크기 기준으로만 캡처
+                    const canvas = await html2canvas(container, {
+                        useCORS: true, allowTaint: true,
+                        scale: scaleVal,
+                        backgroundColor: '#000000',
+                        logging: false,
+                        width: cw,
+                        height: ch,
+                        windowWidth: cw,
+                        windowHeight: ch,
+                    });
+                    // 최종 출력 크기로 정중앙 크롭
+                    const finalCanvas = document.createElement('canvas');
+                    finalCanvas.width = outW;
+                    finalCanvas.height = outH;
+                    const ctx = finalCanvas.getContext('2d');
+                    const sx = Math.max(0, (canvas.width - outW) / 2);
+                    const sy = Math.max(0, (canvas.height - outH) / 2);
+                    ctx.drawImage(canvas, sx, sy, outW, outH, 0, 0, outW, outH);
+                    const blob = await new Promise(resolve => finalCanvas.toBlob(resolve, 'image/jpeg', imageQuality === 'high' ? 0.95 : 0.88));
+
+                    await saveToDB(blob, naming.filename, naming.folderName, naming.base);
+                    const all = await loadAllFromDB();
+                    setSavedImages(all);
+                    saveToGallery(blob, naming.filename);
+                    setIsCapturing(false);
+
+                    if (accessToken) {
+                        setToastMsg("☁️ 갤러리 저장 + 드라이브 업로드 중...");
+                        setShowToast(true);
+                        const lastItem = all[all.length - 1];
+                        await handleDriveUpload(lastItem);
+                    } else {
+                        setToastMsg("✓ 갤러리에 저장됐습니다!");
+                        setShowToast(true);
+                        setTimeout(() => setShowToast(false), 3000);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    setIsCapturing(false);
+                    setToastMsg("오류가 발생했습니다. 다시 시도해주세요.");
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 3000);
+                }
+            };
+
+            /* ===== 카메라 끄기 ===== */
+            const stopCamera = () => {
+                if (stream) {
+                    stream.getTracks().forEach(t => t.stop());
+                    setStream(null);
+                }
+                // 화면 방향 고정 해제
+                if (screen.orientation && screen.orientation.unlock) {
+                    screen.orientation.unlock();
+                }
+                setCameraMode(false);
+            };
+
+            /* ===== 컴포넌트 언마운트 시 카메라 정리 ===== */
+            useEffect(() => {
+                return () => { if (stream) stream.getTracks().forEach(t => t.stop()); };
+            }, [stream]);
+
+            /* ===== 셔터 버튼: 카메라 모드면 찍기, 아니면 카메라 실행 ===== */
+            const handleShutter = () => {
+                if (cameraMode) {
+                    takePhoto();
+                } else {
+                    // 사진 있든 없든 항상 카메라 새로 열기
+                    setImages([]);
+                    startCamera();
+                }
+            };
+
+            const rotateField = (e, field) => {
+                e.stopPropagation();
+                if (field.type === 'date') return;
+                const cycle = field.quick || ['시공 전', '시공 중', '시공 후'];
+                let idx = cycle.indexOf(field.value);
+                let nextVal = cycle[(idx + 1) % cycle.length];
+                updateFieldValue(field.id, nextVal);
+            };
+
+            const updateFieldValue = (id, val) => {
+                setFields(fields.map(f => {
+                    if (f.id === id) {
+                        const newHistory = [val, ...f.history.filter(h => h !== val && !f.quick.includes(h))].slice(0, 10);
+                        return { ...f, value: val, history: newHistory };
+                    }
+                    return f;
+                }));
+                setShowModal(false);
+            };
+
+            const saveQuickBtnText = (fieldId, btnIdx, newText) => {
+                setFields(fields.map(f => {
+                    if (f.id === fieldId) {
+                        const nextQuick = [...f.quick];
+                        nextQuick[btnIdx] = newText;
+                        return { ...f, quick: nextQuick };
+                    }
+                    return f;
+                }));
+                setIsEditingQuick(null);
+            };
+
+            /* ===== 라벨 롱프레스 메뉴: 폴더명/파일명 구성요소 선택 ===== */
+            const applyNameRole = (field, nextRole) => {
+                setFields(prev =>
+                    prev.map(fd => {
+                        if (fd.id === field.id) {
+                            return { ...fd, nameRole: nextRole };
+                        }
+                        // 같은 역할을 가진 다른 항목은 해제 (각 역할은 하나만)
+                        if (nextRole && fd.nameRole === nextRole) {
+                            return { ...fd, nameRole: null };
+                        }
+                        return fd;
+                    })
+                );
+
+                let msg = '';
+                if (nextRole === 'folder') msg = '이 항목이 폴더명으로 지정되었습니다.';
+                else if (nextRole === 'file1') msg = '이 항목이 파일명 구성요소 #1(공종)으로 지정되었습니다.';
+                else if (nextRole === 'file2') msg = '이 항목이 파일명 구성요소 #2(위치)로 지정되었습니다.';
+                else msg = '이 항목은 이름 규칙에서 제외되었습니다.';
+
+                setToastMsg(msg);
+                setShowToast(true);
+                setTimeout(() => setShowToast(false), 1500);
+                setRoleMenuFieldId(null);
+            };
+
+            const handleLabelLongPress = (field) => {
+                // 3초 동안 누르고 있으면 역할 선택 리스트를 연다.
+                setRoleMenuFieldId(field.id);
+            };
+
+            const startLabelPress = (field) => {
+                if (labelPressTimerRef.current) clearTimeout(labelPressTimerRef.current);
+                labelPressTriggeredRef.current = false;
+                labelPressTimerRef.current = setTimeout(() => {
+                    labelPressTriggeredRef.current = true;
+                    handleLabelLongPress(field);
+                }, 3000); // 3초 롱프레스
+            };
+
+            const cancelLabelPress = () => {
+                if (labelPressTimerRef.current) {
+                    clearTimeout(labelPressTimerRef.current);
+                    labelPressTimerRef.current = null;
+                }
+            };
+
+            const handleLabelClick = (e, field) => {
+                e.stopPropagation();
+                // 롱프레스가 이미 처리되었으면 클릭 동작(이름 변경)은 생략
+                if (labelPressTriggeredRef.current) return;
+                const n = prompt("항목명 수정:", field.label);
+                if (n) {
+                    setFields(fields.map(fd => fd.id === field.id ? { ...fd, label: n } : fd));
+                }
+            };
+
+            /* ===== 적용: 사진 + 보드판 합성 후 브라우저에 임시 저장 ===== */
+            const triggerApply = async () => {
+                if (images.length === 0) {
+                    setToastMsg("먼저 사진을 불러와 주세요.");
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 2000);
+                    return;
+                }
+                setIsCapturing(true);
+                await new Promise(r => setTimeout(r, 400));
+
+                const container = captureContainerRef.current;
+                if (!container || typeof html2canvas !== 'function') {
+                    setToastMsg("합성 준비 중... 다시 시도해 주세요.");
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 2000);
+                    setIsCapturing(false);
+                    return;
+                }
+                const naming = getNamingInfo();
+                const [outW, outH] = RESOLUTIONS[imageQuality][aspectRatio];
+                const cw = container.offsetWidth;
+                const ch = container.offsetHeight;
+                const scaleVal = Math.max(outW / cw, outH / ch);
+                try {
+                    const canvas = await html2canvas(container, {
+                        useCORS: true, allowTaint: true,
+                        scale: scaleVal, backgroundColor: '#000000', logging: false,
+                        width: cw, height: ch,
+                        windowWidth: cw, windowHeight: ch,
+                    });
+                    const finalCanvas = document.createElement('canvas');
+                    finalCanvas.width = outW; finalCanvas.height = outH;
+                    const ctx = finalCanvas.getContext('2d');
+                    const sx = Math.max(0, (canvas.width - outW) / 2);
+                    const sy = Math.max(0, (canvas.height - outH) / 2);
+                    ctx.drawImage(canvas, sx, sy, outW, outH, 0, 0, outW, outH);
+                    const blob = await new Promise(resolve => finalCanvas.toBlob(resolve, 'image/jpeg', imageQuality === 'high' ? 0.95 : 0.88));
+                    await saveToDB(blob, naming.filename, naming.folderName, naming.base);
+                    setSavedImages(await loadAllFromDB());
+                    saveToGallery(blob, naming.filename);
+                    setToastMsg("✓ 갤러리에 저장됐습니다!");
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 2500);
+                } catch (err) {
+                    console.error(err);
+                    setToastMsg("합성 중 오류가 발생했습니다.");
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 2500);
+                } finally {
+                    setIsCapturing(false);
+                }
+            };
+
+            const addFieldAction = (type) => {
+                const labels = { text: '비고', date: '날짜', loc: '위치', work: '공종', stage: '내용' };
+                const values = { text: '내용 입력', date: new Date().toISOString().split('T')[0], loc: '층/호수', work: '추가공종', stage: '시공 전' };
+                setFields([...fields, { 
+                    id: Date.now(), label: labels[type], value: values[type], type: type === 'date' ? 'date' : 'text', color: '#2D2D2D',
+                    quick: type === 'stage' ? ['시공 전', '시공 중', '시공 후'] : ['옵션 1', '옵션 2', '옵션 3'],
+                    history: [], nameRole: null
+                }]);
+                setShowAddMenu(false);
+                setToastMsg("새 항목이 추가되었습니다.");
+                setShowToast(true);
+                setTimeout(() => setShowToast(false), 2000);
+            };
+
+            const loadTemplate = (t) => {
+                setFields(JSON.parse(JSON.stringify(t.fields)));
+                setBoardScale(t.scale);
+                setBoardPos(t.pos);
+                setShowTemplateModal(false);
+                setToastMsg(`${t.name} 로드 완료!`);
+                setShowToast(true);
+                setTimeout(() => setShowToast(false), 2000);
+            };
+
+            const [templates, setTemplates] = useState([
+                { id: 1, name: '양식 1 (기본 전기)', fields: JSON.parse(JSON.stringify(fields)), scale: 0.5, pos: 'pos-bl' },
+                { id: 2, name: '양식 2 (설비 광폭)', fields: JSON.parse(JSON.stringify(fields)), scale: 0.8, pos: 'pos-tr' }
+            ]);
+
+            const currentField = fields.find(f => f.id === activeFieldId);
+            const roleTargetField = fields.find(f => f.id === roleMenuFieldId);
+
+            return (
+                <div className="mobile-frame shadow-2xl">
+                    <div className="notch"></div>
+
+                    {/* ===== 카메라 전체화면 오버레이 - 가로 레이아웃 ===== */}
+                    {cameraMode && (
+                        <div style={{
+                            position:'fixed', top:0, left:0,
+                            width:'100vw', height:'100vh',
+                            zIndex:9999, background:'#000',
+                            display:'flex', flexDirection:'row',
+                            /* 세로 모드일 때 강제 가로 회전 */
+                            transform: window.innerHeight > window.innerWidth ? 'rotate(90deg)' : 'none',
+                            transformOrigin: 'center center',
+                            ...(window.innerHeight > window.innerWidth ? {
+                                width: '100vh',
+                                height: '100vw',
+                                top: '50%',
+                                left: '50%',
+                                transform: 'translate(-50%, -50%) rotate(90deg)',
+                            } : {})
+                        }}>
+                            {/* 왼쪽: 비율 선택 - 실제 비율 모양으로 */}
+                            <div style={{width:50, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:10, padding:'0 4px', zIndex:10, background:'rgba(0,0,0,0.5)'}}>
+                                {[
+                                    {r:'1:1', w:28, h:28},
+                                    {r:'4:3', w:32, h:24},
+                                    {r:'16:9', w:36, h:20},
+                                ].map(({r, w, h})=>(
+                                    <button key={r} onClick={()=>setAspectRatio(r)} style={{
+                                        display:'flex', flexDirection:'column', alignItems:'center', gap:3,
+                                        background:'none', border:'none', cursor:'pointer', padding:'4px 0'
+                                    }}>
+                                        {/* 비율 모양 박스 */}
+                                        <div style={{
+                                            width:w, height:h,
+                                            border: aspectRatio===r ? '2px solid #FF8C00' : '1.5px solid rgba(255,255,255,0.5)',
+                                            borderRadius:2,
+                                            background: aspectRatio===r ? 'rgba(255,140,0,0.2)' : 'transparent',
+                                            display:'flex', alignItems:'center', justifyContent:'center'
+                                        }}>
+                                            {aspectRatio===r && <div style={{width:6,height:6,borderRadius:'50%',background:'#FF8C00'}}></div>}
+                                        </div>
+                                        {/* 비율 텍스트 */}
+                                        <span style={{
+                                            fontSize:9, fontWeight:900,
+                                            color: aspectRatio===r ? '#FF8C00' : 'rgba(255,255,255,0.6)'
+                                        }}>{r}</span>
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* 가운데: 카메라 뷰 */}
+                            <div style={{flex:1, position:'relative', overflow:'hidden'}}>
+                                <video ref={videoRef} style={{width:'100%', height:'100%', objectFit:'cover'}} autoPlay playsInline muted />
+
+                                {/* 세이프라인 + 바깥 어둡게 처리 */}
+                                {(() => {
+                                    const ratioMap = {'1:1':[1,1],'4:3':[4,3],'16:9':[16,9]};
+                                    const [rw,rh] = ratioMap[aspectRatio];
+                                    const maxW=92, maxH=84;
+                                    let w=maxW, h=(maxW/rw)*rh;
+                                    if(h>maxH){h=maxH; w=(maxH/rh)*rw;}
+                                    const marginX = (100-w)/2;
+                                    const marginY = (100-h)/2;
+                                    return (
+                                        <>
+                                            {/* 바깥 어두운 영역 4개 */}
+                                            <div style={{position:'absolute',top:0,left:0,right:0,height:`${marginY}%`,background:'rgba(0,0,0,0.55)',zIndex:5,pointerEvents:'none'}}/>
+                                            <div style={{position:'absolute',bottom:0,left:0,right:0,height:`${marginY}%`,background:'rgba(0,0,0,0.55)',zIndex:5,pointerEvents:'none'}}/>
+                                            <div style={{position:'absolute',top:`${marginY}%`,bottom:`${marginY}%`,left:0,width:`${marginX}%`,background:'rgba(0,0,0,0.55)',zIndex:5,pointerEvents:'none'}}/>
+                                            <div style={{position:'absolute',top:`${marginY}%`,bottom:`${marginY}%`,right:0,width:`${marginX}%`,background:'rgba(0,0,0,0.55)',zIndex:5,pointerEvents:'none'}}/>
+                                            {/* 세이프라인 테두리 */}
+                                            <div style={{
+                                                position:'absolute', zIndex:6,
+                                                left:`${marginX}%`, top:`${marginY}%`,
+                                                width:`${w}%`, height:`${h}%`,
+                                                border:'1.5px solid rgba(255,255,255,0.7)',
+                                                pointerEvents:'none'
+                                            }}>
+                                                {/* 4 모서리 황금색 마커 */}
+                                                {[['0%','0%'],['0%','100%'],['100%','0%'],['100%','100%']].map(([t,l],i)=>(
+                                                    <div key={i} style={{position:'absolute',top:t,left:l,width:14,height:14,
+                                                        borderTop:i<2?'2.5px solid #FFD700':'none',
+                                                        borderBottom:i>=2?'2.5px solid #FFD700':'none',
+                                                        borderLeft:i%2===0?'2.5px solid #FFD700':'none',
+                                                        borderRight:i%2===1?'2.5px solid #FFD700':'none',
+                                                        transform:`translate(${i%2===1?'-100%':'0'},${i>=2?'-100%':'0'})`
+                                                    }}/>
+                                                ))}
+                                            </div>
+                                            {/* 보드판 - 세이프라인 모서리에 정확히 붙게 */}
+                                            <div style={{
+                                                position:'absolute', zIndex:8, pointerEvents:'none',
+                                                ...(boardPos==='pos-tl' ? {top:`${marginY}%`, left:`${marginX}%`} :
+                                                    boardPos==='pos-tr' ? {top:`${marginY}%`, right:`${marginX}%`} :
+                                                    boardPos==='pos-bl' ? {bottom:`${marginY}%`, left:`${marginX}%`} :
+                                                    {bottom:`${marginY}%`, right:`${marginX}%`}),
+                                                transform: `scale(${boardScale})`,
+                                                transformOrigin: boardPos==='pos-tl'?'top left':boardPos==='pos-tr'?'top right':boardPos==='pos-bl'?'bottom left':'bottom right',
+                                                opacity:0.95, boxShadow:'0 2px 12px rgba(0,0,0,0.7)'
+                                            }}>
+                                                {fields.slice(0,10).map(f=>(
+                                                    <div key={f.id} className="overlay-row">
+                                                        <div className="overlay-label">{f.label}</div>
+                                                        <div className="overlay-value">{f.value}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {/* 4 꼭지점 위치 선택 버튼 - 세이프라인 모서리에 배치 */}
+                                            {[
+                                                {pos:'pos-tl', icon:'fa-arrow-up-left',   t:`${marginY}%`, l:`${marginX}%`},
+                                                {pos:'pos-tr', icon:'fa-arrow-up-right',   t:`${marginY}%`, r:`${marginX}%`},
+                                                {pos:'pos-bl', icon:'fa-arrow-down-left',  b:`${marginY}%`, l:`${marginX}%`},
+                                                {pos:'pos-br', icon:'fa-arrow-down-right', b:`${marginY}%`, r:`${marginX}%`},
+                                            ].map(({pos,icon,t,b,l,r})=>(
+                                                <button key={pos} onClick={()=>setBoardPos(pos)} style={{
+                                                    position:'absolute', zIndex:10, width:30, height:30,
+                                                    top:t, bottom:b, left:l, right:r,
+                                                    transform: pos==='pos-tl'?'translate(-30%,-30%)':pos==='pos-tr'?'translate(30%,-30%)':pos==='pos-bl'?'translate(-30%,30%)':'translate(30%,30%)',
+                                                    borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center',
+                                                    background: boardPos===pos ? '#FF8C00' : 'rgba(0,0,0,0.6)',
+                                                    border: boardPos===pos ? '2px solid #FFD700' : '1.5px solid rgba(255,255,255,0.3)',
+                                                    color: boardPos===pos ? '#fff' : 'rgba(255,255,255,0.7)', fontSize:10,
+                                                }}>
+                                                    <i className={`fa-solid ${icon}`}></i>
+                                                </button>
+                                            ))}
+                                        </>
+                                    );
+                                })()}
+
+                                {/* 상단: HD/SD */}
+                                <div style={{position:'absolute', top:8, left:'50%', transform:'translateX(-50%)', zIndex:10, display:'flex', gap:6, alignItems:'center'}}>
+                                    {[['normal','SD'],['high','HD']].map(([q,label])=>(
+                                        <button key={q} onClick={()=>setImageQuality(q)} style={{
+                                            padding:'3px 8px', borderRadius:5, fontWeight:900, fontSize:10,
+                                            background: imageQuality===q ? '#FF8C00' : 'rgba(0,0,0,0.55)',
+                                            color: imageQuality===q ? '#fff' : 'rgba(255,255,255,0.7)',
+                                            border: imageQuality===q ? '1.5px solid #FF8C00' : '1.5px solid rgba(255,255,255,0.2)',
+                                        }}>{label}</button>
+                                    ))}
+                                </div>
+
+                                {/* 하단: 현재 설정 요약 */}
+                                <div style={{position:'absolute', bottom:8, left:'50%', transform:'translateX(-50%)', zIndex:10}}>
+                                    <span style={{background:'rgba(0,0,0,0.6)', color:'#FFD700', padding:'3px 8px', borderRadius:6, fontSize:9, fontWeight:900, whiteSpace:'nowrap'}}>
+                                        {aspectRatio} · {imageQuality==='high'?'HD':'SD'} · {RESOLUTIONS[imageQuality][aspectRatio].join('×')}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* 오른쪽: 슬라이더 + 셔터 버튼 + 닫기 */}
+                            <div style={{width:70, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'space-between', padding:'16px 4px', background:'rgba(0,0,0,0.5)'}}>
+                                {/* 닫기 버튼 */}
+                                <button onClick={stopCamera} style={{width:32,height:32,background:'rgba(255,255,255,0.15)',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',color:'white',border:'1.5px solid rgba(255,255,255,0.3)'}}>
+                                    <i className="fa-solid fa-xmark text-sm"></i>
+                                </button>
+
+                                {/* +/- 버튼으로 보드판 크기 조절 */}
+                                <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:8, flex:1, justifyContent:'center', padding:'8px 0'}}>
+                                    <span style={{color:'rgba(255,255,255,0.6)', fontSize:8, fontWeight:900}}>보드판</span>
+                                    {/* + 버튼 */}
+                                    <button 
+                                        onClick={() => setBoardScale(s => Math.min(2.0, Math.round((s + 0.1)*10)/10))}
+                                        style={{width:36, height:36, borderRadius:'50%', background:'rgba(255,255,255,0.2)', border:'1.5px solid rgba(255,255,255,0.4)', color:'white', fontSize:20, fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center'}}
+                                    >+</button>
+                                    {/* 현재 크기 표시 */}
+                                    <div style={{background:'rgba(0,0,0,0.5)', borderRadius:6, padding:'4px 6px', textAlign:'center'}}>
+                                        <span style={{color:'#FF8C00', fontSize:11, fontWeight:900}}>{Math.round(boardScale*100)}%</span>
+                                    </div>
+                                    {/* - 버튼 */}
+                                    <button 
+                                        onClick={() => setBoardScale(s => Math.max(0.1, Math.round((s - 0.1)*10)/10))}
+                                        style={{width:36, height:36, borderRadius:'50%', background:'rgba(255,255,255,0.2)', border:'1.5px solid rgba(255,255,255,0.4)', color:'white', fontSize:20, fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center'}}
+                                    >−</button>
+                                </div>
+
+                                {/* 셔터 버튼 */}
+                                <div onClick={takePhoto} style={{width:60,height:60,borderRadius:'50%',background:'#FF8C00',border:'5px solid #fff',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',boxShadow:'0 4px 20px rgba(255,140,0,0.5)'}}>
+                                    <div style={{width:44,height:44,borderRadius:'50%',background:'#fff',border:'3px solid #eee'}}></div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* [메인 뷰] */}
+                    <div className={`flex flex-col h-full ${view !== 'main' ? 'view-hidden' : ''}`}>
+                        <div className="pt-8 px-4 pb-2 flex justify-between items-end bg-[#2D2D2D] flex-shrink-0 z-[200]">
+                            <div>
+                                <h1 className="text-sm font-black italic text-[#FFD700] tracking-tighter uppercase leading-none">DRIVE SHOOT</h1>
+                                <p className="text-[9px] text-gray-400 font-mono mt-1 font-bold truncate max-w-[150px]">AUTO_FILENAME.JPG</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {user ? (
+                                    <div className="user-status" onClick={handleLogout}>
+                                        <span>{user.email.split('@')[0]}</span>
+                                        <span style={{fontSize:'9px',opacity:0.7}}> 로그아웃</span>
+                                    </div>
+                                ) : (
+                                    <button onClick={handleGoogleLogin} className="bg-white px-3 py-1.5 rounded-lg flex items-center gap-2 shadow-lg active:scale-95 transition-all text-slate-800">
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google__G__Logo.svg" className="w-3 h-3" />
+                                        <span className="text-[10px] font-black">G 로그인</span>
+                                    </button>
+                                )}
+                                <button onClick={() => setShowHelp(true)} className="bg-white/10 p-1.5 rounded-full text-white active:scale-90 transition-all" title="도움말"><i className="fa-solid fa-circle-question text-xs"></i></button>
+                                <button onClick={() => setView('settings')} className="bg-white/10 p-1.5 rounded-full text-white active:scale-90 transition-all"><i className="fa-solid fa-gear text-xs"></i></button>
+                            </div>
+                        </div>
+
+                        {/* 라벨 롱프레스 역할 선택 바 - 항상 상단에 고정 표시 */}
+                        {roleTargetField && (
+                            <div className="px-4 pt-2">
+                                <div className="bg-white rounded-2xl border border-slate-200 shadow-xl text-[10px] font-bold text-slate-700 py-1">
+                                    <div className="px-3 pt-2 pb-1 text-[11px] text-slate-500 flex justify-between items-center">
+                                        <span className="font-extrabold text-slate-800">[{roleTargetField.label}] 이름 규칙 설정</span>
+                                        <button
+                                            className="text-slate-400 text-xs"
+                                            onClick={(e) => { e.stopPropagation(); setRoleMenuFieldId(null); }}
+                                        >
+                                            <i className="fa-solid fa-xmark"></i>
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); applyNameRole(roleTargetField, 'folder'); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-red-50 flex items-center gap-2"
+                                    >
+                                        <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                        폴더명으로 사용 (빨간 표시)
+                                    </button>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); applyNameRole(roleTargetField, 'file1'); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center gap-2"
+                                    >
+                                        <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                                        파일명1 (공종) 으로 사용
+                                    </button>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); applyNameRole(roleTargetField, 'file2'); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-green-50 flex items-center gap-2"
+                                    >
+                                        <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                                        파일명2 (위치) 로 사용
+                                    </button>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); applyNameRole(roleTargetField, null); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-500"
+                                    >
+                                        이름 규칙에서 제외
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="board-editor shadow-lg mt-2">
+                            {fields.map((f, index) => (
+                                <div key={f.id} className="stamp-row group" 
+                                    onClick={() => { 
+                                        if (!isEditMode) { 
+                                            setActiveFieldId(f.id); 
+                                            setShowModal(true); 
+                                            setRoleMenuFieldId(null); 
+                                        } 
+                                    }}
+                                >
+                                    {/* 라벨 - 편집 모드일 때만 클릭/롱프레스 동작 */}
+                                    <div
+                                        className={`stamp-label ${f.nameRole === 'folder' ? 'role-folder' : f.nameRole === 'file1' ? 'role-file1' : f.nameRole === 'file2' ? 'role-file2' : ''}`}
+                                        onMouseDown={() => isEditMode && startLabelPress(f)}
+                                        onMouseUp={() => isEditMode && cancelLabelPress()}
+                                        onMouseLeave={() => isEditMode && cancelLabelPress()}
+                                        onTouchStart={() => isEditMode && startLabelPress(f)}
+                                        onTouchEnd={() => isEditMode && cancelLabelPress()}
+                                        onClick={(e) => isEditMode && handleLabelClick(e, f)}
+                                    >
+                                        <span style={{position:'relative', zIndex:2}}>{f.label}</span>
+                                        {/* 역할 뱃지 */}
+                                        {f.nameRole === 'folder' && <span className="role-badge">📁 폴더</span>}
+                                        {f.nameRole === 'file1' && <span className="role-badge">📄 파일1</span>}
+                                        {f.nameRole === 'file2' && <span className="role-badge">📄 파일2</span>}
+                                    </div>
+                                    <div className="stamp-value">
+                                        <span className="truncate pr-2">{f.value}</span>
+                                        {!isEditMode && <i className={`fa-solid ${f.type === 'date' ? 'fa-calendar' : 'fa-caret-down'} text-slate-200 text-[14px] ml-auto`}></i>}
+                                    </div>
+                                    <div className="action-group">
+                                        {f.type !== 'date' && <div className="rotate-trigger" onClick={(e) => rotateField(e, f)}><i className="fa-solid fa-rotate text-base"></i></div>}
+                                        {isEditMode && (
+                                            <>
+                                                <div className="del-btn" onClick={(e) => { e.stopPropagation(); setFields(fields.filter(fd => fd.id !== f.id)); }}><i className="fa-solid fa-xmark text-lg"></i></div>
+                                                <div className="reorder-btns">
+                                                    <div className="reorder-btn" onClick={(e) => { e.stopPropagation(); const nf = [...fields]; if(index > 0) {[nf[index], nf[index-1]] = [nf[index-1], nf[index]]; setFields(nf); } }}><i className="fa-solid fa-chevron-up"></i></div>
+                                                    <div className="reorder-btn border-t border-slate-100" onClick={(e) => { e.stopPropagation(); const nf = [...fields]; if(index < fields.length-1) {[nf[index], nf[index+1]] = [nf[index+1], nf[index]]; setFields(nf); } }}><i className="fa-solid fa-chevron-down"></i></div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="smart-toolbar relative">
+                            <div className="flex gap-1 shrink-0 relative">
+                                <button onClick={() => { setShowTemplateModal(true); setShowQR(false); }} className="btn-action btn-template active:scale-90 shadow-md"><span>양식</span></button>
+                                <button onClick={() => setIsEditMode(!isEditMode)} className={`btn-action bg-slate-700 text-white active:scale-95 ${isEditMode ? 'bg-[#FF8C00] font-black shadow-[0_0_10px_#FF8C00]' : ''}`}><span>{isEditMode ? '완료' : '편집'}</span></button>
+                                
+                                {isEditMode && (
+                                    <button onClick={() => setShowAddMenu(!showAddMenu)} className="btn-action btn-plus active:scale-90 shadow-md animate-in fade-in slide-in-from-left-2 duration-200"><i className="fa-solid fa-plus text-[12px]"></i><span>칸추가</span></button>
+                                )}
+                                
+                                {showAddMenu && isEditMode && (
+                                    <div className="add-menu-container animate-in slide-in-from-bottom duration-200 shadow-2xl">
+                                        {['text', 'date', 'loc', 'work', 'stage'].map(t => (
+                                            <button key={t} onClick={() => addFieldAction(t)} className="add-menu-item"><span>{({text:'비고', date:'날짜', loc:'위치', work:'공종', stage:'내용'})[t]} 추가</span></button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                                <div className="scale-save-group">
+                                <button onClick={() => setBoardScale(Math.max(0.1, boardScale - 0.1))} className="scale-btn"><i className="fa-solid fa-minus"></i></button>
+                                <div className="scale-value-box">{Math.round(boardScale * 100)}%</div>
+                                <button onClick={() => setBoardScale(Math.min(1.5, boardScale + 0.1))} className="scale-btn"><i className="fa-solid fa-plus"></i></button>
+                                <button onClick={triggerApply} disabled={isCapturing} className="btn-inline-save active:scale-95 transition-all disabled:opacity-60">
+                                    {isCapturing ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-check"></i>}
+                                    <span>{isCapturing ? '합성중' : '적용'}</span>
+                                </button>
+                            </div>
+
+                        </div>
+
+                        {/* 작업 영역 - capturing 시 가이드/마커 숨김 */}
+                        <div className={`workspace-area ${images.length > 0 ? 'has-img' : ''} ${isCapturing ? 'capturing' : ''}`} 
+                            onClick={() => { if(images.length === 0 && !cameraMode) startCamera(); }}>
+                            <div className="scale-guide">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <span key={n} className="guide-num">{n}</span>)}</div>
+                            
+                            {/* 카메라 모드일 때는 위 오버레이가 처리 */}
+                            {cameraMode && (
+                                <div className="absolute inset-0 z-[90] bg-black flex items-center justify-center">
+                                    <div style={{color:'white',fontSize:14,opacity:0.5}}>카메라 실행 중...</div>
+
+                                </div>
+                            )}
+                            {images.length === 0 && (
+                                <div className="absolute inset-0 pointer-events-none z-[80]">
+                                    {['tl', 'tr', 'bl', 'br'].map(id => (
+                                        <div key={id} className={`pos-preselector pointer-events-auto ${id.startsWith('t')?'top-2':'bottom-2'} ${id.endsWith('l')?'left-2':'right-2'} ${boardPos === 'pos-'+id ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); setBoardPos('pos-'+id); }}><i className={`fa-solid ${boardPos === 'pos-'+id ? 'fa-circle-check' : 'fa-expand'}`}></i></div>
+                                    ))}
+                                </div>
+                            )}
+                            {images.length > 0 ? (
+                                <div style={{flex:1, position:'relative', background:'#000', display:'flex', alignItems:'center', justifyContent:'center', overflow:'visible'}}>
+                                    {/* 실제 합성 영역 */}
+                                    <div ref={captureContainerRef} style={{
+                                        position:'relative', width:'100%', height:'100%',
+                                        overflow: isCapturing ? 'hidden' : 'visible'
+                                    }}>
+                                        <img src={images[0]} className="preview-img" alt="미리보기" />
+                                        {/* 보드판 - 짤리지 않게 */}
+                                        <div className={`overlay-board ${boardPos}`} style={{ 
+                                            transform: `scale(${boardScale})`, 
+                                            transformOrigin: boardPos === 'pos-tl' ? 'top left' : boardPos === 'pos-tr' ? 'top right' : boardPos === 'pos-bl' ? 'bottom left' : 'bottom right',
+                                            position: 'absolute',
+                                            zIndex: 10
+                                        }}>
+                                            {fields.slice(0, 10).map(f => (
+                                                <div key={f.id} className="overlay-row">
+                                                    <div className="overlay-label">{f.label}</div>
+                                                    <div className="overlay-value">{f.value}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {/* 오버레이 UI - captureContainerRef 밖에 위치 (합성에 포함 안 됨) */}
+                                    {!isCapturing && (
+                                        <>
+                                            {/* 사진 변경 안내 */}
+                                            <div style={{position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:'pointer', zIndex:20}}
+                                                onClick={() => { setImages([]); setTimeout(() => fileInputRef.current.click(), 100); }}>
+                                                <i className="fa-solid fa-arrows-rotate text-[#FFD700] text-3xl" style={{opacity:0.35}}></i>
+                                                <p style={{color:'#FFD700', fontWeight:700, fontSize:10, marginTop:12, textAlign:'center', opacity:0.5, textShadow:'0 2px 4px rgba(0,0,0,1)'}}>
+                                                    화면 정중앙을 터치하면<br/>이미지가 변경됩니다
+                                                </p>
+                                            </div>
+                                            {/* 꼭지점 위치 버튼 */}
+                                            {['tl','tr','bl','br'].map(p => boardPos !== 'pos-'+p && (
+                                                <div key={p} className="pos-square" 
+                                                    style={{position:'absolute', [p[0]==='t'?'top':'bottom']:'10px', [p[1]==='l'?'left':'right']:'10px', zIndex:30}}
+                                                    onClick={(e) => { e.stopPropagation(); setBoardPos('pos-'+p); }}>
+                                                    <i className="fa-solid fa-expand text-xl"></i>
+                                                </div>
+                                            ))}
+                                        </>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="flex-1 flex flex-col items-center justify-center text-slate-300 gap-4 p-10 text-center animate-pulse">
+                                    <i className="fa-solid fa-images text-7xl text-[#FFD700] opacity-60"></i>
+                                    <p className="text-xl font-bold text-white leading-tight shadow-sm text-center">이곳을 누르면 이미지를 불러와서,<br/>삽입할 수 있습니다.</p>
+                                </div>
+                            )}
+                            <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
+                        </div>
+
+                        {/* 하단 메인 바 */}
+                        <div className="bottom-ctrl-box">
+                            {/* 갤러리 버튼 */}
+                            <button onClick={() => { stopCamera(); fileInputRef.current.click(); }} className="sub-ctrl text-white/70 flex flex-col items-center gap-1 active:scale-95 transition-transform">
+                                <i className="fa-regular fa-image text-3xl"></i>
+                                <span className="text-[9px] font-bold uppercase opacity-60">Load</span>
+                            </button>
+
+                            {/* 셔터 버튼 - 항상 카메라 촬영 */}
+                            <div className={`shutter-btn shadow-2xl active:scale-95 transition-transform ${cameraMode ? 'bg-white' : ''}`} onClick={handleShutter}>
+                                {cameraMode
+                                    ? <div className="shutter-inner shadow-inner" style={{background:'#FF8C00'}}></div>
+                                    : <div className="shutter-inner shadow-inner flex items-center justify-center"><i className="fa-solid fa-camera text-[#FF8C00] text-2xl"></i></div>
+                                }
+                            </div>
+
+                            {/* Sync 버튼 */}
+                            <button onClick={() => setShowSavedGallery(true)} className="sub-ctrl text-[#FFD700] flex flex-col items-center gap-1 active:scale-95 transition-transform relative">
+                                <i className="fa-solid fa-cloud-arrow-up text-3xl"></i>
+                                <span className="text-[9px] font-bold uppercase text-[#FFD700]">Sync</span>
+                                {savedImages.length > 0 && <span className="absolute -top-1 -right-1 bg-[#FF8C00] text-white text-[9px] font-black rounded-full w-4 h-4 flex items-center justify-center">{savedImages.length}</span>}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* [설정 화면] - 빨간색 표시 항목 완벽 복구 (영상 레이아웃 준수) */}
+                    <div id="view-settings" className={`${view !== 'settings' ? 'view-hidden' : ''} animate-in slide-in-from-right duration-300 h-full`}>
+                        <div className="settings-header">
+                            <div className="flex items-center gap-4">
+                                <button onClick={() => setView('main')} className="w-10 h-10 flex items-center justify-center bg-white/10 rounded-full active:scale-90 transition-transform"><i className="fa-solid fa-arrow-left text-lg text-white"></i></button>
+                                <h2 className="text-xl font-black italic uppercase tracking-tighter text-white">Settings</h2>
+                            </div>
+                            <button onClick={() => setView('main')} className="text-[#FFD700] opacity-50"><i className="fa-solid fa-xmark text-2xl"></i></button>
+                        </div>
+
+                        <div className="settings-section no-scrollbar">
+                            <h3 className="settings-title">저장 및 전송 위치</h3>
+                            <div className="settings-card-group">
+                                {/* 내 구글 드라이브 */}
+                                <div className={`radio-card ${storageLoc === 'mine' ? 'active' : ''}`} onClick={() => setStorageLoc('mine')}>
+                                    <div className="flex items-center justify-between w-full">
+                                        <div className="flex items-center gap-3 text-slate-800 font-extrabold text-sm">
+                                            <i className={`fa-brands fa-google-drive text-xl ${storageLoc === 'mine' ? 'text-[#FF8C00]' : 'text-slate-400'}`}></i>
+                                            내 구글 드라이브 <span className="recommend-tag">추천</span>
+                                        </div>
+                                        <i className="fa-solid fa-circle-check radio-check"></i>
+                                    </div>
+                                    <div className="mt-3 flex items-start justify-between pl-8 gap-2">
+                                        <div className="flex flex-col text-left">
+                                            <p className="text-[10px] text-indigo-600 font-black mb-1 leading-none">내 폰 저장 후 자동 복사 전송</p>
+                                            <p className="text-[9px] text-slate-400 leading-tight">구글 드라이브 최상위(Root)의 [드라이브샷] 폴더 밑에 자동 저장됩니다.</p>
+                                        </div>
+                                        <button className="radio-card-btn">위치 변경</button>
+                                    </div>
+                                </div>
+                                
+                                {/* 공유 문서함 전송 */}
+                                <div className={`radio-card ${storageLoc === 'shared' ? 'active' : ''}`} onClick={() => setStorageLoc('shared')}>
+                                    <div className="flex items-center justify-between w-full">
+                                        <div className="flex items-center gap-3 text-slate-800 font-extrabold text-sm">
+                                            <i className={`fa-solid fa-share-nodes text-xl ${storageLoc === 'shared' ? 'text-[#FF8C00]' : 'text-slate-400'}`}></i>
+                                            공유 문서/드라이브로 전송
+                                        </div>
+                                        <i className="fa-solid fa-circle-check radio-check"></i>
+                                    </div>
+                                    <div className="mt-3 flex items-start justify-between pl-8 gap-2">
+                                        <div className="flex flex-col text-left">
+                                            <p className="text-[10px] text-indigo-600 font-black mb-1 leading-none">내 폰 저장 후 자동 복사 전송</p>
+                                            <p className="text-[9px] text-slate-400 leading-tight">공유받으신 폴더나 문서로 사진이 즉시 전송됩니다.</p>
+                                        </div>
+                                        <button className="radio-card-btn radio-card-btn-primary bg-indigo-600 text-white border-none">위치 선택</button>
+                                    </div>
+                                    {storageLoc === 'shared' && (
+                                        <div className="mt-4 pl-8 animate-in fade-in slide-in-from-top-2">
+                                            <div className="bg-[#f8fafc] border border-slate-100 rounded-xl p-3 flex flex-col gap-3 shadow-inner">
+                                                {['수원 고색동 101공구', '평택 지제역 현장'].map(folder => (
+                                                    <div key={folder} className="flex items-center justify-between text-xs font-bold text-slate-600 cursor-pointer text-left" onClick={() => setSelectedFolder(folder)}>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className={`w-1.5 h-1.5 rounded-full ${selectedFolder === folder ? 'bg-[#FF8C00]' : 'bg-slate-200'}`}></div>
+                                                            <span className={selectedFolder === folder ? 'text-slate-900 font-black' : ''}>{folder}</span>
+                                                        </div>
+                                                        {selectedFolder === folder && <i className="fa-solid fa-check text-[10px] text-[#FF8C00]"></i>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* 내 휴대폰에만 저장 */}
+                                <div className={`radio-card ${storageLoc === 'local' ? 'active' : ''}`} onClick={() => setStorageLoc('local')}>
+                                    <div className="flex items-center justify-between w-full">
+                                        <div className="flex items-center gap-3 text-slate-800 font-extrabold text-sm">
+                                            <i className={`fa-solid fa-mobile-screen-button text-xl ${storageLoc === 'local' ? 'text-[#FF8C00]' : 'text-slate-400'}`}></i>
+                                            내 휴대폰에만 저장
+                                        </div>
+                                        <i className="fa-solid fa-circle-check radio-check"></i>
+                                    </div>
+                                    <div className="mt-2 pl-8 flex justify-between items-center">
+                                        <span className="text-[9px] text-red-400 font-black leading-none italic uppercase tracking-tighter">Local Storage Only</span>
+                                        <button className="text-[9px] font-black text-slate-500 border-b border-slate-300">위치 변경</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h3 className="settings-title">구글 드라이브 용량</h3>
+                            <div className="usage-container shadow-xl border-2 border-yellow-500/10">
+                                <div className="flex justify-between items-end text-sm font-black italic text-white">
+                                    <span className="uppercase tracking-tighter text-white uppercase">Drive Usage 12.5GB / 15GB</span>
+                                    <span className="text-[#FFD700]">83%</span>
+                                </div>
+                                <div className="usage-bar-bg"><div className="usage-bar-fill" style={{width:'83%'}}></div></div>
+                            </div>
+
+                            <h3 className="settings-title">데이터 및 전송 조건</h3>
+                            <div className="settings-card-group space-y-1">
+                                <div className="switch-row px-2">
+                                    <div className="flex flex-col text-left">
+                                        <div className="font-bold text-sm text-slate-800">실시간 자동 업로드</div>
+                                        <div className="text-[9px] text-slate-400">촬영 즉시 클라우드로 전송</div>
+                                    </div>
+                                    <label className="toggle-switch"><input type="checkbox" defaultChecked /><span className="toggle-slider"></span></label>
+                                </div>
+                                <div className="mx-2 border-t border-slate-50 my-1"></div>
+                                <div className="switch-row px-2">
+                                    <div className="flex flex-col text-left">
+                                        <div className="font-bold text-sm text-slate-800">Wi-Fi 환경에서만 전송</div>
+                                        <div className="text-[9px] text-blue-500 font-bold">권장: 데이터 요금 절약</div>
+                                    </div>
+                                    <label className="toggle-switch"><input type="checkbox" checked={wifiOnly} onChange={()=>setWifiOnly(!wifiOnly)}/><span className="toggle-slider"></span></label>
+                                </div>
+                            </div>
+                            
+                            <h3 className="settings-title">이미지 품질 및 해상도</h3>
+                            <div className="settings-card-group space-y-2">
+                                {/* 화질 선택 */}
+                                <div className="switch-row px-2">
+                                    <div className="text-left">
+                                        <p className="font-extrabold text-sm text-slate-800">고화질 (HD)</p>
+                                        <p className="text-[9px] text-slate-400 font-medium">꺼짐: SD ({RESOLUTIONS['normal'][aspectRatio].join('×')}) / 켜짐: HD ({RESOLUTIONS['high'][aspectRatio].join('×')})</p>
+                                    </div>
+                                    <label className="toggle-switch">
+                                        <input type="checkbox" checked={imageQuality === 'high'} onChange={() => setImageQuality(imageQuality === 'high' ? 'normal' : 'high')} />
+                                        <span className="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                {/* 비율 선택 */}
+                                <div className="border-t border-slate-50 pt-3 px-2">
+                                    <p className="font-extrabold text-sm text-slate-800 mb-2">이미지 비율</p>
+                                    <div className="flex gap-2">
+                                        {[
+                                            { ratio:'1:1', w:1, h:1, desc:'정사각형' },
+                                            { ratio:'4:3', w:4, h:3, desc:'일반 사진' },
+                                            { ratio:'16:9', w:16, h:9, desc:'와이드' }
+                                        ].map(({ratio, w, h, desc}) => (
+                                            <div key={ratio} onClick={() => setAspectRatio(ratio)}
+                                                style={{
+                                                    flex:1, border: aspectRatio === ratio ? '2px solid #FF8C00' : '2px solid #e2e8f0',
+                                                    borderRadius:12, padding:'8px 4px', textAlign:'center', cursor:'pointer',
+                                                    background: aspectRatio === ratio ? '#fffbeb' : '#f8fafc'
+                                                }}
+                                            >
+                                                {/* 비율 미리보기 박스 */}
+                                                <div style={{display:'flex', justifyContent:'center', marginBottom:4}}>
+                                                    <div style={{
+                                                        width: w >= h ? 32 : Math.round(32*w/h),
+                                                        height: h >= w ? 20 : Math.round(20*h/w),
+                                                        border: `2px solid ${aspectRatio === ratio ? '#FF8C00' : '#94a3b8'}`,
+                                                        borderRadius:2,
+                                                        display:'flex', alignItems:'center', justifyContent:'center'
+                                                    }}>
+                                                        <span style={{fontSize:7, fontWeight:900, color: aspectRatio === ratio ? '#FF8C00' : '#94a3b8'}}>{ratio}</span>
+                                                    </div>
+                                                </div>
+                                                <p style={{fontSize:10, fontWeight:900, color: aspectRatio === ratio ? '#FF8C00' : '#475569'}}>{ratio}</p>
+                                                <p style={{fontSize:8, color:'#94a3b8'}}>{desc}</p>
+                                                <p style={{fontSize:7, color:'#cbd5e1', marginTop:2}}>{RESOLUTIONS[imageQuality][ratio].join('×')}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                {/* 원본 백업 */}
+                                <div className="switch-row border-t border-slate-50 pt-2 px-2">
+                                    <div className="text-left"><p className="font-extrabold text-sm text-slate-800">원본 사진 같이 저장</p><p className="text-[9px] text-indigo-500 font-bold tracking-tight">보드판 없는 원본사진 별도 백업</p></div>
+                                    <label className="toggle-switch"><input type="checkbox" /><span className="toggle-slider"></span></label>
+                                </div>
+                            </div>
+
+                            <button onClick={() => setView('main')} className="w-full bg-[#2D2D2D] text-[#FFD700] py-5 rounded-[1.5rem] font-black text-lg active:scale-95 transition-transform shadow-2xl">설정 완료</button>
+                        </div>
+                    </div>
+
+                    {/* 성공 알림 토스트: 화면 정중앙 고정 */}
+                    {showToast && (
+                        <div className="toast-center animate-in zoom-in duration-300">
+                            <div className="flex flex-col items-center gap-4">
+                                <div className="w-16 h-16 bg-[#FFD700]/20 rounded-full flex items-center justify-center border border-yellow-500/20 shadow-inner">
+                                    <i className="fa-solid fa-check text-4xl text-[#FFD700]"></i>
+                                </div>
+                                <p className="text-xl font-bold text-white uppercase">{toastMsg}</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 양식 관리 & QR 공유 모달 */}
+                    {showTemplateModal && view === 'main' && (
+                        <div className="modal-overlay" onClick={() => { setShowTemplateModal(false); setShowQR(false); }}>
+                            <div className="modal-content shadow-2xl animate-in slide-in-from-top duration-300" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-6 px-1">
+                                    <h3 className="text-2xl font-bold text-slate-800 tracking-tight italic uppercase tracking-tighter">Photo Template List</h3>
+                                    <button onClick={() => { setShowTemplateModal(false); setShowQR(false); }} className="text-slate-400 p-2 active:scale-90 transition-transform"><i className="fa-solid fa-xmark text-3xl"></i></button>
+                                </div>
+                                {showQR ? (
+                                    <div className="text-center animate-in zoom-in duration-300">
+                                        <div className="qr-placeholder flex flex-col items-center justify-center mb-6">
+                                            <i className="fa-solid fa-qrcode text-7xl text-slate-300"></i>
+                                            <p className="text-[10px] text-slate-400 font-black mt-2 uppercase tracking-widest">Scan QR to Share</p>
+                                        </div>
+                                        <p className="text-lg font-bold text-indigo-900 mb-4">[{activeTemplate?.name}] 공유</p>
+                                        <div className="flex flex-col gap-3">
+                                            <button onClick={() => alert("링크 복사됨!")} className="w-full py-5 bg-[#FF8C00] text-white rounded-2xl font-black text-lg shadow-lg flex items-center justify-center gap-2 mb-2 active:scale-95 transition-all"><i className="fa-solid fa-share-nodes"></i> 공유하기</button>
+                                            <button onClick={() => setShowQR(false)} className="w-full py-4 bg-slate-100 rounded-2xl font-bold text-slate-600">뒤로가기</button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col flex-1 overflow-hidden px-1">
+                                        <button onClick={() => { 
+                                            setTemplates([...templates, { id: Date.now(), name: `현장 양식 ${templates.length + 1}`, fields: JSON.parse(JSON.stringify(fields)), scale: boardScale, pos: boardPos }]); 
+                                            setToastMsg("새 양식이 저장되었습니다!"); 
+                                            setShowToast(true); 
+                                            setTimeout(() => setShowToast(false), 2000); 
+                                        }} className="w-full py-5 bg-[#2D2D2D] text-[#FFD700] rounded-2xl font-black text-lg mb-6 shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 shadow-inner"><i className="fa-solid fa-plus text-xl"></i> 현재 설정을 새 양식으로 저장</button>
+                                        
+                                        <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 pb-10">
+                                            {templates.map(t => (
+                                                <div key={t.id} className="template-item group" onClick={() => loadTemplate(t)}>
+                                                    <div className="flex items-center justify-between w-full">
+                                                        <div className="flex flex-col text-left">
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-black text-slate-800 text-lg leading-tight">{t.name}</p>
+                                                                <i className="fa-solid fa-pen text-slate-300 text-xs cursor-pointer hover:text-indigo-500" onClick={(e) => { e.stopPropagation(); const n = prompt("양식 이름 수정:", t.name); if(n) setTemplates(templates.map(tmp => tmp.id === t.id ? {...tmp, name:n}:tmp)); }}></i>
+                                                            </div>
+                                                            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight mt-1 opacity-70 italic text-left">배율 {Math.round(t.scale*100)}% · {t.pos.replace('pos-', '').toUpperCase()} 위치</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="template-actions" onClick={e => e.stopPropagation()}>
+                                                        <button onClick={(e) => { 
+                                                            e.stopPropagation(); 
+                                                            setTemplates(templates.map(tmp => tmp.id === t.id ? { ...tmp, fields: JSON.parse(JSON.stringify(fields)), scale: boardScale, pos: boardPos } : tmp)); 
+                                                            setToastMsg("업데이트 완료!"); 
+                                                            setShowToast(true); 
+                                                            setTimeout(() => setShowToast(false), 2000); 
+                                                        }} className="btn-t-action btn-t-update"><i className="fa-solid fa-arrows-rotate"></i> 업데이트</button>
+                                                        <button onClick={(e) => { e.stopPropagation(); setTemplates(templates.filter(tmp => tmp.id !== t.id)); }} className="btn-t-action btn-t-delete"><i className="fa-solid fa-trash-can"></i> 삭제</button>
+                                                        <button onClick={(e) => { e.stopPropagation(); setActiveTemplate(t); setShowQR(true); }} className="btn-t-action btn-t-qr shadow-inner bg-slate-50 text-slate-400"><i className="fa-solid fa-qrcode"></i> QR공유</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 도움말 모달 - 초보자용 사용법 */}
+                    {showHelp && view === 'main' && (
+                        <div className="modal-overlay" onClick={() => setShowHelp(false)}>
+                            <div className="modal-content shadow-2xl animate-in slide-in-from-top duration-300 max-w-[340px]" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-xl font-bold text-slate-800">📖 사용 방법</h3>
+                                    <button onClick={() => setShowHelp(false)} className="text-slate-400 p-2"><i className="fa-solid fa-xmark text-2xl"></i></button>
+                                </div>
+                                <div className="text-left text-sm text-slate-600 space-y-4">
+                                    <div><strong className="text-slate-800">1. 사진 불러오기</strong><br/>작업 영역을 클릭하거나 Load 버튼 → 갤러리/카메라에서 선택</div>
+                                    <div><strong className="text-slate-800">2. 보드판 편집</strong><br/>공사명, 공종 등 클릭해서 수정 · +/-로 크기 조절</div>
+                                    <div><strong className="text-slate-800">3. 적용 버튼</strong><br/>사진+보드판을 하나로 합쳐서 브라우저에 저장</div>
+                                    <div><strong className="text-slate-800">4. 구글 드라이브</strong><br/>Sync → 다운로드 → Drive에 업로드 페이지에서 파일 올리기</div>
+                                </div>
+                                <button onClick={() => setShowHelp(false)} className="mt-6 w-full py-4 bg-[#2D2D2D] text-[#FFD700] rounded-2xl font-bold">확인</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 저장된 이미지 갤러리 - 다운로드 & 구글 드라이브 업로드 준비 */}
+                    {showSavedGallery && view === 'main' && (
+                        <div className="modal-overlay" onClick={() => setShowSavedGallery(false)}>
+                            <div className="modal-content shadow-2xl animate-in slide-in-from-top duration-300" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-6 px-1">
+                                    <h3 className="text-2xl font-bold text-slate-800 tracking-tight italic uppercase">저장된 합성 이미지</h3>
+                                    <button onClick={() => setShowSavedGallery(false)} className="text-slate-400 p-2 active:scale-90 transition-transform"><i className="fa-solid fa-xmark text-3xl"></i></button>
+                                </div>
+                                <p className="text-sm text-slate-500 mb-4">Drive 업로드 버튼을 누르면 자동으로 [드라이브샷] 폴더에 저장됩니다.</p>
+                                {savedImages.length > 0 && (
+                                    <button 
+                                        onClick={handleUploadAll}
+                                        disabled={isUploading}
+                                        className="w-full py-3 mb-4 rounded-2xl font-black text-white flex items-center justify-center gap-2"
+                                        style={{background: isUploading ? '#94a3b8' : '#4285F4'}}
+                                    >
+                                        {isUploading ? <><i className="fa-solid fa-spinner fa-spin"></i> {uploadProgress}</> : <><i className="fa-brands fa-google-drive"></i> 전체 일괄 업로드 ({savedImages.length}장)</>}
+                                    </button>
+                                )}
+                                <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 pb-10 max-h-[60vh]">
+                                    {savedImages.length === 0 ? (
+                                        <div className="text-center py-12 text-slate-400">
+                                            <i className="fa-solid fa-images text-5xl mb-4 opacity-50"></i>
+                                            <p className="font-bold">저장된 이미지가 없습니다.</p>
+                                            <p className="text-xs mt-2">사진을 불러온 뒤 [적용] 버튼을 누르세요.</p>
+                                        </div>
+                                    ) : (
+                                        savedImages.map(item => (
+                                            <div key={item.id} className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex gap-4 items-center">
+                                                <img src={URL.createObjectURL(item.blob)} alt="" className="w-20 h-20 object-cover rounded-xl" />
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-bold text-slate-800 truncate text-sm">{item.filename}</p>
+                                                    <p className="text-[10px] text-slate-400">
+                                                        {item.folderName ? `폴더: ${item.folderName}` : '폴더: (미지정)'}
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-400">{new Date(item.createdAt).toLocaleString('ko-KR')}</p>
+                                                </div>
+                                                <div className="flex flex-col gap-2">
+                                                    <button onClick={() => downloadBlob(item.blob, item.filename)} className="btn-t-action btn-t-update text-center py-2"><i className="fa-solid fa-download"></i> 다운로드</button>
+                                                    <button 
+                                                        onClick={() => handleDriveUpload(item)} 
+                                                        disabled={isUploading}
+                                                        className="btn-t-action text-center py-2"
+                                                        style={{background: isUploading ? '#94a3b8' : '#4285F4', color: 'white'}}
+                                                    >
+                                                        {isUploading ? <><i className="fa-solid fa-spinner fa-spin"></i> {uploadProgress}</> : <><i className="fa-brands fa-google-drive"></i> Drive 업로드</>}
+                                                    </button>
+                                                    <button onClick={async () => { await deleteFromDB(item.id); setSavedImages(await loadAllFromDB()); }} className="btn-t-action btn-t-delete text-center py-2"><i className="fa-solid fa-trash-can"></i></button>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 항목 편집 모달 */}
+                    {showModal && currentField && view === 'main' && (
+                        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+                            <div className="modal-content shadow-2xl animate-in slide-in-from-bottom duration-300" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-5 px-1">
+                                    <h3 className="text-2xl font-bold text-slate-800 tracking-tight italic uppercase">{currentField.label} Select</h3>
+                                    <button onClick={() => setShowModal(false)} className="text-slate-400 p-2 active:scale-90 transition-all"><i className="fa-solid fa-xmark text-3xl"></i></button>
+                                </div>
+                                <div className="flex flex-col flex-1 overflow-hidden pb-10 text-left">
+                                    {currentField.type === 'date' ? (
+                                        <div className="space-y-6"><input type="date" className="date-picker-input shadow-inner" value={currentField.value} onChange={(e) => updateFieldValue(activeFieldId, e.target.value)} /></div>
+                                    ) : (
+                                        <>
+                                            <div className="flex gap-2 mb-8">
+                                                {currentField.quick.map((v, idx) => (
+                                                    <div key={idx} className="flex-1 relative text-center">
+                                                        {isEditingQuick === idx ? (
+                                                            <input 
+                                                                autoFocus
+                                                                className="w-full py-6 bg-[#2D2D2D] text-[#FFD700] rounded-2xl text-center text-base font-bold outline-none shadow-lg"
+                                                                defaultValue={v}
+                                                                onBlur={(e) => saveQuickBtnText(activeFieldId, idx, e.target.value)}
+                                                                onKeyDown={(e) => e.key === 'Enter' && saveQuickBtnText(activeFieldId, idx, e.target.value)}
+                                                            />
+                                                        ) : (
+                                                            <button 
+                                                                onClick={() => updateFieldValue(activeFieldId, v)} 
+                                                                className={`w-full py-6 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-xs transition-all ${currentField.value === v ? 'border-[#FF8C00] bg-orange-50 text-[#FF8C00] shadow-md' : 'text-slate-700'}`}
+                                                            >
+                                                                {v}
+                                                                <div className="quick-edit-icon" onClick={(e) => { e.stopPropagation(); setIsEditingQuick(idx); }}>
+                                                                    <i className="fa-solid fa-pen"></i>
+                                                                </div>
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <p className="text-[13px] font-bold text-slate-400 uppercase mb-3 tracking-widest px-1 italic text-left leading-none">Recent History</p>
+                                            <div className="flex-1 overflow-y-auto no-scrollbar space-y-1 mb-6 border-t border-b border-slate-50 py-2">
+                                                {currentField.history.map((h, i) => (
+                                                    <div key={i} onClick={() => updateFieldValue(activeFieldId, h)} className="p-5 border-b border-slate-50 flex justify-between font-bold text-slate-700 text-xl active:bg-slate-50 transition-colors uppercase tracking-tighter italic text-left"><span>{h}</span><i className="fa-solid fa-rotate-left text-slate-200"></i></div>
+                                                ))}
+                                            </div>
+                                            <input type="text" placeholder="새로운 내용을 입력하세요 (Enter)" className="w-full p-6 bg-slate-50 border-2 border-orange-100 rounded-2xl font-bold outline-none focus:border-[#FF8C00] text-xl shadow-inner transition-all" onKeyDown={(e) => { if(e.key === 'Enter') updateFieldValue(activeFieldId, e.target.value); }} />
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html> eof
