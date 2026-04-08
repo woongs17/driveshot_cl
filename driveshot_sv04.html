@@ -144,10 +144,10 @@
             pointer-events: none; 
             z-index: 60;
         }
-        .pos-tl { top: 0; left: 0; transform-origin: top left; }
-        .pos-tr { top: 0; right: 0; transform-origin: top right; }
-        .pos-bl { bottom: 0; left: 0; transform-origin: bottom left; }
-        .pos-br { bottom: 0; right: 0; transform-origin: bottom right; }
+        .pos-tl { top: 4px; left: 4px; transform-origin: top left; }
+        .pos-tr { top: 4px; right: 4px; transform-origin: top right; }
+        .pos-bl { bottom: 4px; left: 4px; transform-origin: bottom left; }
+        .pos-br { bottom: 4px; right: 4px; transform-origin: bottom right; }
 
         .overlay-row { 
             display: flex; 
@@ -175,8 +175,6 @@
             padding: 0 8px;
             display: flex; 
             align-items: center;
-            justify-content: center;
-            text-align: center;
             white-space: nowrap;
             background: #ffffff;
             min-width: 0;
@@ -633,8 +631,9 @@
                 setToastMsg("📸 촬영 완료! 저장 중...");
                 setShowToast(true);
 
+                // photoUrl을 직접 전달 → React state 타이밍 문제 완전 해결
                 setTimeout(async () => {
-                    await triggerApplyAndUpload();
+                    await triggerApplyAndUpload(photoUrl);
                     setTimeout(() => {
                         setImages([]);
                         startCamera();
@@ -642,101 +641,88 @@
                 }, 600);
             };
 
-            /* ===== [핵심 수정부] 가상 베이킹 합성 엔진 ===== */
-            const captureAndBake = async (outW, outH) => {
-                const container = captureContainerRef.current;
-                const boardEl = container.querySelector('.overlay-board');
-                if (!container || !boardEl) throw new Error("DOM 요소를 찾을 수 없습니다.");
+            /* ===== 합성 엔진 (photoSrc 직접 받아서 state 타이밍 문제 완전 해결) ===== */
+            const captureAndBake = async (outW, outH, photoSrc) => {
+                // photoSrc 우선, 없으면 state fallback
+                const imgSrc = photoSrc || images[0];
+                if (!imgSrc) throw new Error("사진이 없습니다.");
 
-                // 1. 보드판 원본 크기로 분리 캡처 (짤림 방지)
+                // 1. 보드판 DOM을 찾아서 별도 캔버스로 캡처
+                const boardEl = document.querySelector('.overlay-board');
+                if (!boardEl) throw new Error("보드판 요소를 찾을 수 없습니다.");
+
                 const originalTransform = boardEl.style.transform;
-                boardEl.style.transform = 'none'; // 스케일 임시 해제
-                
+                boardEl.style.transform = 'none';
                 const boardCanvas = await html2canvas(boardEl, {
                     useCORS: true, allowTaint: true, scale: 3, backgroundColor: null, logging: false
                 });
-                
-                boardEl.style.transform = originalTransform; // 원상복구
+                boardEl.style.transform = originalTransform;
 
-                // 2. 가상의 도화지(최종 출력 캔버스) 생성
+                // 2. 최종 출력 캔버스
                 const finalCanvas = document.createElement('canvas');
                 finalCanvas.width = outW;
                 finalCanvas.height = outH;
                 const ctx = finalCanvas.getContext('2d');
 
-                // 3. 배경 이미지 (사진) 그리기
+                // 3. 배경 이미지 그리기 (object-fit: cover)
                 const img = new Image();
-                
-                // [오류 해결의 핵심]
-                // 로컬 파일(Blob, Data URL)을 불러올 때 crossOrigin을 "Anonymous"로 설정하면
-                // 브라우저가 보안상 이미지 렌더링을 차단하여 catch 오류를 발생시킵니다.
-                // img.crossOrigin = "Anonymous";  <-- 이 줄을 삭제했습니다.
-
-                img.src = images[0];
+                img.src = imgSrc;
                 await new Promise((resolve, reject) => {
                     img.onload = resolve;
-                    img.onerror = () => reject(new Error("사진을 캔버스에 불러오지 못했습니다."));
+                    img.onerror = () => reject(new Error("사진을 불러오지 못했습니다."));
                 });
 
-                // object-fit: cover 로직 수동 구현 (사진 전체를 꽉 채우게)
                 const imgRatio = img.width / img.height;
                 const outRatio = outW / outH;
                 let sw, sh, sx, sy;
                 if (imgRatio > outRatio) {
-                    sh = img.height;
-                    sw = sh * outRatio;
-                    sx = (img.width - sw) / 2;
-                    sy = 0;
+                    sh = img.height; sw = sh * outRatio;
+                    sx = (img.width - sw) / 2; sy = 0;
                 } else {
-                    sw = img.width;
-                    sh = sw / outRatio;
-                    sx = 0;
-                    sy = (img.height - sh) / 2;
+                    sw = img.width; sh = sw / outRatio;
+                    sx = 0; sy = (img.height - sh) / 2;
                 }
                 ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
 
-                // 4. 보드판 픽셀 사이즈 및 스냅 위치 계산 (빈칸 원천 차단)
-                const cw = container.offsetWidth;
-                const scaleFactor = outW / cw; 
-                const targetBoardWidth = boardEl.offsetWidth * scaleFactor * boardScale;
-                const targetBoardHeight = boardEl.offsetHeight * scaleFactor * boardScale;
+                // 4. 보드판 크기 계산 (짤림 방지 클램핑 포함)
+                // 보드판 실제 픽셀 크기를 출력 해상도 기준으로 스케일
+                const boardNaturalW = boardEl.offsetWidth;
+                const boardNaturalH = boardEl.offsetHeight;
+                // 화면상 컨테이너 너비 기준으로 비율 계산
+                const containerEl = boardEl.closest('[data-capture]') || boardEl.parentElement;
+                const containerW = containerEl ? containerEl.offsetWidth : boardNaturalW / boardScale;
+                const scaleFactor = outW / containerW;
 
-                // 보드판이 이미지보다 클 경우 자동 축소
-                let finalBoardW = targetBoardWidth;
-                let finalBoardH = targetBoardHeight;
+                let finalBoardW = boardNaturalW * scaleFactor * boardScale;
+                let finalBoardH = boardNaturalH * scaleFactor * boardScale;
+
+                // 이미지보다 크면 자동 축소
                 if (finalBoardW > outW) { const r = outW / finalBoardW; finalBoardW = outW; finalBoardH *= r; }
                 if (finalBoardH > outH) { const r = outH / finalBoardH; finalBoardH = outH; finalBoardW *= r; }
 
+                // 5. 위치 계산 (모서리 0 여백)
                 let bx = 0, by = 0;
-                // 모서리에 완벽하게 붙게 (0 여백, 짤림 없음)
                 if (boardPos.includes('r')) bx = outW - finalBoardW;
-                if (boardPos.includes('l')) bx = 0;
                 if (boardPos.includes('b')) by = outH - finalBoardH;
-                if (boardPos.includes('t')) by = 0;
-                // 안전 클램핑
                 bx = Math.max(0, Math.min(bx, outW - finalBoardW));
                 by = Math.max(0, Math.min(by, outH - finalBoardH));
 
-                // 5. 보드판을 사진 위에 덮어씌움
+                // 6. 보드판 합성
                 ctx.drawImage(boardCanvas, 0, 0, boardCanvas.width, boardCanvas.height, bx, by, finalBoardW, finalBoardH);
 
                 return new Promise(resolve => finalCanvas.toBlob(resolve, 'image/jpeg', imageQuality === 'high' ? 0.95 : 0.88));
             };
 
-            const triggerApplyAndUpload = async () => {
+            const triggerApplyAndUpload = async (photoSrc) => {
                 setIsCapturing(true);
                 await new Promise(r => setTimeout(r, 400));
 
-                if (!captureContainerRef.current) {
-                    setIsCapturing(false);
-                    return;
-                }
                 const naming = getNamingInfo();
                 const [outW, outH] = RESOLUTIONS[imageQuality][aspectRatio];
                 
                 try {
-                    // 새로 작성한 베이킹 함수 호출
-                    const blob = await captureAndBake(outW, outH);
+                    // photoSrc 직접 전달로 state 타이밍 문제 해결
+                    const blob = await captureAndBake(outW, outH, photoSrc);
 
                     await saveToDB(blob, naming.filename, naming.folderName, naming.base);
                     const all = await loadAllFromDB();
@@ -942,85 +928,6 @@
                 <div className="mobile-frame shadow-2xl">
                     <div className="notch"></div>
 
-                    {cameraMode && (
-                        <div style={{
-                            position:'fixed', top:0, left:0, width:'100vw', height:'100vh', zIndex:9999, background:'#000',
-                            display:'flex', flexDirection:'row',
-                            transform: window.innerHeight > window.innerWidth ? 'rotate(90deg)' : 'none',
-                            transformOrigin: 'center center',
-                            ...(window.innerHeight > window.innerWidth ? { width: '100vh', height: '100vw', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(90deg)' } : {})
-                        }}>
-                            <div style={{width:50, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:10, padding:'0 4px', zIndex:10, background:'rgba(0,0,0,0.5)'}}>
-                                {[ {r:'1:1', w:28, h:28}, {r:'4:3', w:32, h:24}, {r:'16:9', w:36, h:20} ].map(({r, w, h})=>(
-                                    <button key={r} onClick={()=>setAspectRatio(r)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3, background:'none', border:'none', cursor:'pointer', padding:'4px 0' }}>
-                                        <div style={{ width:w, height:h, border: aspectRatio===r ? '2px solid #FF8C00' : '1.5px solid rgba(255,255,255,0.5)', borderRadius:2, background: aspectRatio===r ? 'rgba(255,140,0,0.2)' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                                            {aspectRatio===r && <div style={{width:6,height:6,borderRadius:'50%',background:'#FF8C00'}}></div>}
-                                        </div>
-                                        <span style={{ fontSize:9, fontWeight:900, color: aspectRatio===r ? '#FF8C00' : 'rgba(255,255,255,0.6)' }}>{r}</span>
-                                    </button>
-                                ))}
-                            </div>
-
-                            <div style={{flex:1, position:'relative', overflow:'hidden'}}>
-                                <video ref={videoRef} style={{width:'100%', height:'100%', objectFit:'cover'}} autoPlay playsInline muted />
-                                {(() => {
-                                    const ratioMap = {'1:1':[1,1],'4:3':[4,3],'16:9':[16,9]};
-                                    const [rw,rh] = ratioMap[aspectRatio];
-                                    const maxW=92, maxH=84;
-                                    let w=maxW, h=(maxW/rw)*rh;
-                                    if(h>maxH){h=maxH; w=(maxH/rh)*rw;}
-                                    const marginX = (100-w)/2;
-                                    const marginY = (100-h)/2;
-                                    return (
-                                        <>
-                                            <div style={{position:'absolute',top:0,left:0,right:0,height:`${marginY}%`,background:'rgba(0,0,0,0.55)',zIndex:5,pointerEvents:'none'}}/>
-                                            <div style={{position:'absolute',bottom:0,left:0,right:0,height:`${marginY}%`,background:'rgba(0,0,0,0.55)',zIndex:5,pointerEvents:'none'}}/>
-                                            <div style={{position:'absolute',top:`${marginY}%`,bottom:`${marginY}%`,left:0,width:`${marginX}%`,background:'rgba(0,0,0,0.55)',zIndex:5,pointerEvents:'none'}}/>
-                                            <div style={{position:'absolute',top:`${marginY}%`,bottom:`${marginY}%`,right:0,width:`${marginX}%`,background:'rgba(0,0,0,0.55)',zIndex:5,pointerEvents:'none'}}/>
-                                            <div style={{ position:'absolute', zIndex:6, left:`${marginX}%`, top:`${marginY}%`, width:`${w}%`, height:`${h}%`, border:'1.5px solid rgba(255,255,255,0.7)', pointerEvents:'none' }}>
-                                                {[['0%','0%'],['0%','100%'],['100%','0%'],['100%','100%']].map(([t,l],i)=>(
-                                                    <div key={i} style={{position:'absolute',top:t,left:l,width:14,height:14, borderTop:i<2?'2.5px solid #FFD700':'none', borderBottom:i>=2?'2.5px solid #FFD700':'none', borderLeft:i%2===0?'2.5px solid #FFD700':'none', borderRight:i%2===1?'2.5px solid #FFD700':'none', transform:`translate(${i%2===1?'-100%':'0'},${i>=2?'-100%':'0'})` }}/>
-                                                ))}
-                                            </div>
-                                            <div style={{
-                                                position:'absolute', zIndex:8, pointerEvents:'none',
-                                                ...(boardPos==='pos-tl' ? {top:'0%', left:'0%'} : boardPos==='pos-tr' ? {top:'0%', right:'0%'} : boardPos==='pos-bl' ? {bottom:'0%', left:'0%'} : {bottom:'0%', right:'0%'}),
-                                                transform: `scale(${boardScale})`, transformOrigin: boardPos==='pos-tl'?'top left':boardPos==='pos-tr'?'top right':boardPos==='pos-bl'?'bottom left':'bottom right', opacity:0.95, boxShadow:'0 2px 12px rgba(0,0,0,0.7)'
-                                            }}>
-                                                {fields.slice(0,10).map(f=>(
-                                                    <div key={f.id} className="overlay-row"><div className="overlay-label">{f.label}</div><div className="overlay-value">{f.value}</div></div>
-                                                ))}
-                                            </div>
-                                            {[ {pos:'pos-tl', icon:'fa-arrow-up-left', t:'0%', l:'0%'}, {pos:'pos-tr', icon:'fa-arrow-up-right', t:'0%', r:'0%'}, {pos:'pos-bl', icon:'fa-arrow-down-left', b:'0%', l:'0%'}, {pos:'pos-br', icon:'fa-arrow-down-right', b:'0%', r:'0%'} ].map(({pos,icon,t,b,l,r})=>(
-                                                <button key={pos} onClick={()=>setBoardPos(pos)} style={{ position:'absolute', zIndex:10, width:30, height:30, top:t, bottom:b, left:l, right:r, transform: pos==='pos-tl'?'translate(-30%,-30%)':pos==='pos-tr'?'translate(30%,-30%)':pos==='pos-bl'?'translate(-30%,30%)':'translate(30%,30%)', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', background: boardPos===pos ? '#FF8C00' : 'rgba(0,0,0,0.6)', border: boardPos===pos ? '2px solid #FFD700' : '1.5px solid rgba(255,255,255,0.3)', color: boardPos===pos ? '#fff' : 'rgba(255,255,255,0.7)', fontSize:10 }}>
-                                                    <i className={`fa-solid ${icon}`}></i>
-                                                </button>
-                                            ))}
-                                        </>
-                                    );
-                                })()}
-                                <div style={{position:'absolute', top:8, left:'50%', transform:'translateX(-50%)', zIndex:10, display:'flex', gap:6, alignItems:'center'}}>
-                                    {[['normal','SD'],['high','HD']].map(([q,label])=>(
-                                        <button key={q} onClick={()=>setImageQuality(q)} style={{ padding:'3px 8px', borderRadius:5, fontWeight:900, fontSize:10, background: imageQuality===q ? '#FF8C00' : 'rgba(0,0,0,0.55)', color: imageQuality===q ? '#fff' : 'rgba(255,255,255,0.7)', border: imageQuality===q ? '1.5px solid #FF8C00' : '1.5px solid rgba(255,255,255,0.2)' }}>{label}</button>
-                                    ))}
-                                </div>
-                                <div style={{position:'absolute', bottom:8, left:'50%', transform:'translateX(-50%)', zIndex:10}}>
-                                    <span style={{background:'rgba(0,0,0,0.6)', color:'#FFD700', padding:'3px 8px', borderRadius:6, fontSize:9, fontWeight:900, whiteSpace:'nowrap'}}>{aspectRatio} · {imageQuality==='high'?'HD':'SD'} · {RESOLUTIONS[imageQuality][aspectRatio].join('×')}</span>
-                                </div>
-                            </div>
-
-                            <div style={{width:70, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'space-between', padding:'16px 4px', background:'rgba(0,0,0,0.5)'}}>
-                                <button onClick={stopCamera} style={{width:32,height:32,background:'rgba(255,255,255,0.15)',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',color:'white',border:'1.5px solid rgba(255,255,255,0.3)'}}><i className="fa-solid fa-xmark text-sm"></i></button>
-                                <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:8, flex:1, justifyContent:'center', padding:'8px 0'}}>
-                                    <span style={{color:'rgba(255,255,255,0.6)', fontSize:8, fontWeight:900}}>보드판</span>
-                                    <button onClick={() => setBoardScale(s => Math.min(2.0, Math.round((s + 0.1)*10)/10))} style={{width:36, height:36, borderRadius:'50%', background:'rgba(255,255,255,0.2)', border:'1.5px solid rgba(255,255,255,0.4)', color:'white', fontSize:20, fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center'}}>+</button>
-                                    <div style={{background:'rgba(0,0,0,0.5)', borderRadius:6, padding:'4px 6px', textAlign:'center'}}><span style={{color:'#FF8C00', fontSize:11, fontWeight:900}}>{Math.round(boardScale*100)}%</span></div>
-                                    <button onClick={() => setBoardScale(s => Math.max(0.1, Math.round((s - 0.1)*10)/10))} style={{width:36, height:36, borderRadius:'50%', background:'rgba(255,255,255,0.2)', border:'1.5px solid rgba(255,255,255,0.4)', color:'white', fontSize:20, fontWeight:900, display:'flex', alignItems:'center', justifyContent:'center'}}>−</button>
-                                </div>
-                                <div onClick={takePhoto} style={{width:60,height:60,borderRadius:'50%',background:'#FF8C00',border:'5px solid #fff',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',boxShadow:'0 4px 20px rgba(255,140,0,0.5)'}}><div style={{width:44,height:44,borderRadius:'50%',background:'#fff',border:'3px solid #eee'}}></div></div>
-                            </div>
-                        </div>
-                    )}
 
                     <div className={`flex flex-col h-full ${view !== 'main' ? 'view-hidden' : ''}`}>
                         <div className="pt-8 px-4 pb-2 flex justify-between items-end bg-[#2D2D2D] flex-shrink-0 z-[200]">
@@ -1107,15 +1014,30 @@
                                     ))}
                                 </div>
                             )}
-                            {images.length > 0 ? (
-                                <div style={{flex:1, position:'relative', background:'#000', display:'flex', alignItems:'center', justifyContent:'center', overflow:'visible'}}>
-                                    <div ref={captureContainerRef} style={{position:'relative', width:'100%', height:'100%', overflow: 'hidden'}}>
-                                        <img src={images[0]} className="preview-img" alt="미리보기" />
+                            {(images.length > 0 || cameraMode) ? (
+                                <div style={{flex:1, position:'relative', background:'#000', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden'}}>
+                                    {/* 카메라 라이브 뷰 + 보드판 오버레이 */}
+                                    <div ref={captureContainerRef} data-capture="true" style={{position:'relative', width:'100%', height:'100%', overflow:'hidden'}}>
+                                        {/* 카메라 모드: video 태그로 실시간 화면 표시 */}
+                                        {cameraMode && (
+                                            <video
+                                                ref={videoRef}
+                                                autoPlay
+                                                playsInline
+                                                muted
+                                                style={{width:'100%', height:'100%', objectFit:'cover', display:'block'}}
+                                            />
+                                        )}
+                                        {/* 갤러리 이미지 모드 */}
+                                        {!cameraMode && images.length > 0 && (
+                                            <img src={images[0]} className="preview-img" alt="미리보기" />
+                                        )}
+                                        {/* 보드판: 카메라/이미지 모드 공통 오버레이 */}
                                         <div className={`overlay-board ${boardPos}`} style={{ transform: `scale(${boardScale})`, transformOrigin: boardPos === 'pos-tl' ? 'top left' : boardPos === 'pos-tr' ? 'top right' : boardPos === 'pos-bl' ? 'bottom left' : 'bottom right', position: 'absolute', zIndex: 10 }}>
                                             {fields.slice(0, 10).map(f => ( <div key={f.id} className="overlay-row"><div className="overlay-label">{f.label}</div><div className="overlay-value">{f.value}</div></div> ))}
                                         </div>
                                     </div>
-                                    {!isCapturing && (
+                                    {!isCapturing && !cameraMode && (
                                         <>
                                             <div style={{position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', cursor:'pointer', zIndex:20}} onClick={() => { setImages([]); setTimeout(() => fileInputRef.current.click(), 100); }}>
                                                 <i className="fa-solid fa-arrows-rotate text-[#FFD700] text-3xl" style={{opacity:0.35}}></i>
