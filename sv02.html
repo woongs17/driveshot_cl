@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style id="camera-rotate-style"></style>
-    <title>드라이브 슛 - 디월트 테마 최종 통합 마스터 (가이드라인 & 사이즈 100% 일치)</title>
+    <title>드라이브 슛 - 디월트 테마 최종 통합 마스터 (가이드라인 및 비율 100% 완벽 일치)</title>
     <!-- 외부 라이브러리 로드 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -95,6 +95,7 @@
             gap: 5px; height: 58px; position: relative;
         }
         .btn-action { height: 42px; padding: 0 10px; border-radius: 10px; font-weight: 800; font-size: 11px; transition: all 0.2s; display: flex; align-items: center; gap: 4px; shrink: 0; }
+        .btn-template { background-color: var(--gunmetal); color: var(--yellow); }
         .btn-edit { background-color: #475569; color: white; }
         .btn-edit.active { background-color: var(--orange); }
 
@@ -113,7 +114,7 @@
             animation: marker-boing 1.5s ease-in-out infinite;
         }
 
-        /* [핵심 수정] margin 0을 통해 화면 끝에서 끝까지 사용하여 비율/크기 동기화 */
+        /* 갤러리 영역 크기 붕괴 100% 방지 로직 적용 */
         .workspace-area {
             flex: 1; margin: 15px 0 0; border: none; border-radius: 0;
             display: flex; flex-direction: column; overflow: hidden; position: relative;
@@ -125,13 +126,11 @@
             position: absolute; width: auto; background: #ffffff; border: 1.5px solid #000000; padding: 0; pointer-events: none; z-index: 60;
         }
 
-        /* 보드판 위치 */
         .overlay-board.pos-tl { top: 0px !important; left: 0px !important; transform-origin: top left; }
         .overlay-board.pos-tr { top: 0px !important; right: 0px !important; transform-origin: top right; }
         .overlay-board.pos-bl { bottom: 0px !important; left: 0px !important; transform-origin: bottom left; }
         .overlay-board.pos-br { bottom: 0px !important; right: 0px !important; transform-origin: bottom right; }
 
-        /* 글자 상/하/좌/우 정렬 완벽 수정 (Flexbox) */
         .overlay-row { display: flex; border-bottom: 1px solid #000000; height: 28px; box-sizing: border-box; align-items: center; }
         .overlay-row:last-child { border-bottom: none; }
         .overlay-label { 
@@ -189,7 +188,6 @@
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        /* ===== 전역 환경 설정 및 구글 API 함수 ===== */
         const GOOGLE_CLIENT_ID = '986985952258-hp9bstq1c75d7f1fsuadrmcd0o7fhagj.apps.googleusercontent.com';
         const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
@@ -234,6 +232,7 @@
             ]);
 
             const [images, setImages] = useState([]);
+            const [isPortrait, setIsPortrait] = useState(false);
             const [boardScale, setBoardScale] = useState(0.5); 
             const [boardPos, setBoardPos] = useState('pos-bl');
             const [showModal, setShowModal] = useState(false);
@@ -371,13 +370,34 @@
             const handleFileChange = (e) => {
                 const files = Array.from(e.target.files);
                 if (files.length === 0) return;
-                setImages([URL.createObjectURL(files[0])]);
-                e.target.value = ''; // 반복 선택 버그 수정
+                const url = URL.createObjectURL(files[0]);
+                const img = new Image();
+                img.onload = () => {
+                    setIsPortrait(img.height > img.width);
+                    setImages([url]);
+                };
+                img.src = url;
+                e.target.value = ''; 
             };
 
-            /* [핵심 수정] 합성 엔진 (사이즈 100% 동기화 로직) */
+            const getPreviewRatio = () => {
+                const [w, h] = aspectRatio.split(':');
+                return (images.length > 0 && isPortrait) ? `${h}/${w}` : `${w}/${h}`;
+            };
+
+            /* [핵심 동기화 엔진] 100% WYSIWYG 캡처 로직 */
             const captureAndBake = async (outW, outH, photoSrc) => {
                 const imgSrc = photoSrc || images[0];
+                const isFromCamera = photoSrc !== undefined;
+                if (!imgSrc) throw new Error("사진이 없습니다.");
+
+                let finalOutW = outW;
+                let finalOutH = outH;
+                if (!isFromCamera && isPortrait) {
+                    finalOutW = outH;
+                    finalOutH = outW;
+                }
+
                 const boardEl = document.querySelector('.overlay-board');
                 const originalTransform = boardEl.style.transform;
                 boardEl.style.transform = 'none';
@@ -387,34 +407,51 @@
                     onclone: (clonedDoc) => {
                         const rows = clonedDoc.querySelectorAll('.overlay-row');
                         rows.forEach(r => { r.style.display = 'flex'; r.style.alignItems = 'center'; });
+                        clonedDoc.querySelectorAll('.overlay-label, .overlay-value').forEach(el => {
+                            el.style.paddingBottom = '3px'; // 한글 폰트 수직 정렬 완벽 보정
+                        });
                     }
                 });
                 boardEl.style.transform = originalTransform;
 
                 const finalCanvas = document.createElement('canvas');
-                finalCanvas.width = outW; finalCanvas.height = outH;
+                finalCanvas.width = finalOutW; finalCanvas.height = finalOutH;
                 const ctx = finalCanvas.getContext('2d');
                 const img = new Image(); img.src = imgSrc;
                 await new Promise(r => img.onload = r);
                 
                 const imgRatio = img.width / img.height;
-                const outRatio = outW / outH;
+                const outRatio = finalOutW / finalOutH;
                 let sw, sh, sx, sy;
                 if (imgRatio > outRatio) { sh = img.height; sw = sh * outRatio; sx = (img.width - sw) / 2; sy = 0; }
                 else { sw = img.width; sh = sw / outRatio; sx = 0; sy = (img.height - sh) / 2; }
-                ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+                ctx.drawImage(img, sx, sy, sw, sh, 0, 0, finalOutW, finalOutH);
 
-                // 카메라 모드와 갤러리 모드의 스케일을 100% 일치시키기 위해 컨테이너의 실제 폭 참조
-                const cw = captureContainerRef.current.offsetWidth;
-                const scaleFactor = outW / cw;
+                // 카메라의 가이드박스 또는 갤러리 프리뷰박스의 실제 Width 값을 참조하여 스케일 계산
+                let cw;
+                if (isFromCamera) {
+                    const ratioMap = {'1:1':[1,1],'4:3':[4,3],'16:9':[16,9]};
+                    const [rw,rh] = ratioMap[aspectRatio] || [4,3];
+                    const maxW=100, maxH=75; // Safety Box 비율 (CSS와 동일하게 맞춤)
+                    let sgW=maxW, sgH=(maxW/rw)*rh;
+                    if(sgH>maxH){sgH=maxH; sgW=(maxH/rh)*rw;}
+                    // 가로화면(Landscape) 100vh(픽셀값) 대비 세이프박스 폭 계산
+                    const screenLandscapeWidth = Math.max(window.innerWidth, window.innerHeight);
+                    cw = screenLandscapeWidth * (sgW / 100);
+                } else {
+                    cw = captureContainerRef.current ? captureContainerRef.current.offsetWidth : boardEl.offsetWidth / boardScale;
+                }
+
+                const scaleFactor = finalOutW / cw;
                 let finalBoardW = boardEl.offsetWidth * scaleFactor * boardScale;
                 let finalBoardH = boardEl.offsetHeight * scaleFactor * boardScale;
                 
                 let bx = 0, by = 0;
                 if (boardPos.includes('l')) bx = 0;
-                if (boardPos.includes('r')) bx = outW - finalBoardW;
+                if (boardPos.includes('r')) bx = finalOutW - finalBoardW;
                 if (boardPos.includes('t')) by = 0;
-                if (boardPos.includes('b')) by = outH - finalBoardH;
+                if (boardPos.includes('b')) by = finalOutH - finalBoardH;
+
                 ctx.drawImage(boardCanvas, 0, 0, boardCanvas.width, boardCanvas.height, bx, by, finalBoardW, finalBoardH);
                 return new Promise(res => finalCanvas.toBlob(res, 'image/jpeg', 0.95));
             };
@@ -422,6 +459,7 @@
             const triggerApply = async () => {
                 if (images.length === 0) return;
                 setIsCapturing(true);
+                await new Promise(r => setTimeout(r, 100));
                 const naming = getNamingInfo();
                 const [outW, outH] = RESOLUTIONS[imageQuality][aspectRatio];
                 try {
@@ -435,18 +473,38 @@
             const handleShutter = async () => {
                 if (cameraMode) {
                     const video = videoRef.current;
+                    const vw = video.videoWidth;
+                    const vh = video.videoHeight;
                     const canvas = document.createElement('canvas');
-                    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-                    canvas.getContext('2d').drawImage(video, 0, 0);
+                    
+                    // 무조건 가로(Landscape) 사진으로 저장하도록 회전
+                    if (vh > vw) {
+                        canvas.width = vh;
+                        canvas.height = vw;
+                        const ctx = canvas.getContext('2d');
+                        ctx.translate(0, vw);
+                        ctx.rotate(-Math.PI / 2);
+                        ctx.drawImage(video, 0, 0, vw, vh);
+                    } else {
+                        canvas.width = vw;
+                        canvas.height = vh;
+                        canvas.getContext('2d').drawImage(video, 0, 0);
+                    }
                     const photoUrl = canvas.toDataURL('image/jpeg', 0.95);
-                    stopCamera(); setImages([photoUrl]); setIsCapturing(true);
-                    const naming = getNamingInfo();
-                    const [outW, outH] = RESOLUTIONS[imageQuality][aspectRatio];
-                    const blob = await captureAndBake(outW, outH, photoUrl);
-                    await saveToDB(blob, naming.filename, naming.folderName, naming.base);
-                    setSavedImages(await loadAllFromDB());
-                    setIsCapturing(false); setToastMsg("📸 저장 완료!"); setShowToast(true); 
-                    setTimeout(() => { setShowToast(false); startCamera(); }, 1500);
+                    stopCamera(); 
+                    setIsPortrait(false); // 카메라는 항상 가로
+                    setImages([photoUrl]); 
+                    setIsCapturing(true);
+
+                    setTimeout(async () => {
+                        const naming = getNamingInfo();
+                        const [outW, outH] = RESOLUTIONS[imageQuality][aspectRatio];
+                        const blob = await captureAndBake(outW, outH, photoUrl);
+                        await saveToDB(blob, naming.filename, naming.folderName, naming.base);
+                        setSavedImages(await loadAllFromDB());
+                        setIsCapturing(false); setToastMsg("📸 저장 완료!"); setShowToast(true); 
+                        setTimeout(() => { setShowToast(false); startCamera(); }, 1500);
+                    }, 500); 
                 } else { setImages([]); startCamera(); }
             };
 
@@ -481,44 +539,73 @@
                 <div className="mobile-frame shadow-2xl">
                     <div className="notch"></div>
 
+                    {/* === 카메라 모드 (가이드라인 내 보드판 배치 완벽 지원) === */}
                     {cameraMode && (
-                        <div style={{ position:'fixed', inset:0, zIndex:9999, background:'#000' }}>
-                            {/* 비디오 화면 전체 채우기 */}
-                            <video ref={videoRef} autoPlay playsInline muted style={{position:'absolute', width:'100%', height:'100%', objectFit:'cover'}} />
+                        <div style={{
+                            position:'fixed', top:0, left:0, width:'100vw', height:'100vh', zIndex:9999, background:'#000',
+                            transform: window.innerHeight > window.innerWidth ? 'rotate(90deg)' : 'none',
+                            transformOrigin: 'center center',
+                            ...(window.innerHeight > window.innerWidth ? { width: '100vh', height: '100vw', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(90deg)' } : {})
+                        }}>
+                            {/* 카메라 비디오 피드 */}
+                            <video ref={videoRef} autoPlay playsInline muted style={{position:'absolute', width:'100%', height:'100%', objectFit:'cover', zIndex:1}} />
                             
-                            {/* 상단 비율 조절 버튼 */}
-                            <div style={{position:'absolute', top:0, left:0, right:0, padding:'20px', display:'flex', justifyContent:'center', gap:15, zIndex:20, background:'linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)'}}>
-                                {['1:1', '4:3', '16:9'].map(r => (
-                                    <button key={r} onClick={()=>setAspectRatio(r)} style={{ color: aspectRatio===r ? '#FF8C00' : '#fff', fontWeight:900, fontSize:14, padding:'4px 10px', background:'rgba(0,0,0,0.4)', borderRadius:'8px' }}>{r}</button>
-                                ))}
+                            {/* 상단 비율 조절 버튼 & 직관적 아이콘 추가 */}
+                            <div style={{position:'absolute', top: 15, left: 0, right: 0, zIndex: 20, display:'flex', justifyContent:'center', gap: 25}}>
+                                {['1:1', '4:3', '16:9'].map(r => {
+                                    const isSel = aspectRatio === r;
+                                    const c = isSel ? '#FF8C00' : '#fff';
+                                    let w, h;
+                                    if(r==='1:1') {w=20; h=20;}
+                                    if(r==='4:3') {w=24; h=18;}
+                                    if(r==='16:9') {w=32; h=18;}
+                                    return (
+                                    <button key={r} onClick={()=>setAspectRatio(r)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:6, background:'none', border:'none' }}>
+                                        <span style={{color: c, fontSize:12, fontWeight:'900', textShadow:'0 2px 4px rgba(0,0,0,0.8)'}}>{r}</span>
+                                        <div style={{width: w, height: h, border: `2.5px solid ${c}`, borderRadius: 4, boxShadow:'0 2px 4px rgba(0,0,0,0.5)', background: isSel?'rgba(255,140,0,0.3)':'transparent'}}></div>
+                                    </button>
+                                )})}
                             </div>
 
-                            {/* [핵심 수정] 가이드라인 박스 내부에 보드판과 포인터 종속 */}
-                            <div style={{ 
-                                position:'absolute', top:'50%', left:0, right:0, transform:'translateY(-50%)', 
-                                aspectRatio: aspectRatio.replace(':', '/'), 
-                                border:'2px dashed rgba(255,215,0,0.8)', 
-                                boxShadow:'0 0 0 9999px rgba(0,0,0,0.6)', 
-                                zIndex:10, pointerEvents:'none' 
-                            }}>
-                                {/* 보드판 (가이드라인 박스 안에 존재) */}
-                                <div className={`overlay-board ${boardPos}`} style={{ transform: `scale(${boardScale})`, transformOrigin: boardPos === 'pos-tl' ? 'top left' : boardPos === 'pos-tr' ? 'top right' : boardPos === 'pos-bl' ? 'bottom left' : 'bottom right', position: 'absolute', zIndex: 10 }}>
-                                    {fields.slice(0, 10).map(f => ( <div key={f.id} className="overlay-row"><div className="overlay-label">{f.label}</div><div className="overlay-value">{f.value}</div></div> ))}
+                            {/* [가이드라인 박스] 이 영역 내부에서만 보드판이 위치함 */}
+                            <div style={{ position:'absolute', inset: '70px 100px 70px 30px', display:'flex', alignItems:'center', justifyContent:'center', zIndex: 10, pointerEvents:'none' }}>
+                                <div style={{
+                                    position: 'relative', width: '10000px', maxWidth: '100%', maxHeight: '100%',
+                                    aspectRatio: aspectRatio.replace(':', '/'),
+                                    border: '2.5px dashed rgba(255,215,0,0.9)', boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)'
+                                }}>
+                                    {/* 보드판 (가이드라인 박스 안쪽) */}
+                                    <div className={`overlay-board ${boardPos}`} style={{ transform: `scale(${boardScale})`, transformOrigin: boardPos === 'pos-tl' ? 'top left' : boardPos === 'pos-tr' ? 'top right' : boardPos === 'pos-bl' ? 'bottom left' : 'bottom right', position: 'absolute', zIndex: 10 }}>
+                                        {fields.slice(0, 10).map(f => ( <div key={f.id} className="overlay-row"><div className="overlay-label">{f.label}</div><div className="overlay-value">{f.value}</div></div> ))}
+                                    </div>
+                                    {/* 조작 포인터 (가이드라인 박스 안쪽) */}
+                                    {['tl','tr','bl','br'].map(p => boardPos !== 'pos-'+p && (
+                                        <div key={p} className="pos-square" style={{position:'absolute', pointerEvents:'auto', top: p[0]==='t'?'10px':'auto', bottom: p[0]==='b'?'10px':'auto', left: p[1]==='l'?'10px':'auto', right: p[1]==='r'?'10px':'auto', zIndex:30}} onClick={(e)=>{e.stopPropagation(); setBoardPos('pos-'+p);}}>
+                                            <i className="fa-solid fa-expand text-xl"></i>
+                                        </div>
+                                    ))}
                                 </div>
-                                {/* 위치 변경 포인터 (가이드라인 박스 안에 존재) */}
-                                {['tl','tr','bl','br'].map(p => boardPos !== 'pos-'+p && (
-                                    <div key={p} className="pos-square" style={{position:'absolute', pointerEvents:'auto', [p[0]==='t'?'top':'bottom']:'10px', [p[1]==='l'?'left':'right']:'10px', zIndex:30}} onClick={(e)=>{e.stopPropagation(); setBoardPos('pos-'+p);}}><i className="fa-solid fa-expand text-xl"></i></div>
-                                ))}
                             </div>
 
-                            <div style={{position:'absolute', bottom:0, left:0, right:0, padding:'30px', display:'flex', alignItems:'center', justifyContent:'space-between', zIndex:20, background:'linear-gradient(to top, rgba(0,0,0,0.8), transparent)'}}>
-                                <button onClick={stopCamera} className="text-white text-3xl"><i className="fa-solid fa-xmark"></i></button>
-                                <div onClick={handleShutter} className="shutter-btn" style={{width:75, height:75, border:'5px solid #fff', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer'}}><div style={{background:'#FF8C00', width:55, height:55, borderRadius:'50%'}}></div></div>
-                                <div style={{width: 30}}></div>
+                            {/* 하단 보드 스케일 조절 기능 카메라 모드에 추가 */}
+                            <div style={{position: 'absolute', bottom: '20px', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.7)', borderRadius: '20px', padding: '6px 16px', zIndex: 50, gap: '15px'}}>
+                                <button onClick={(e) => {e.stopPropagation(); setBoardScale(s => Math.max(0.1, s-0.1))}} className="text-white text-2xl font-black px-2 active:scale-90">-</button>
+                                <span className="text-[#FF8C00] font-black text-lg w-12 text-center">{Math.round(boardScale*100)}%</span>
+                                <button onClick={(e) => {e.stopPropagation(); setBoardScale(s => Math.min(1.5, s+0.1))}} className="text-white text-2xl font-black px-2 active:scale-90">+</button>
+                            </div>
+
+                            {/* 우측 패널: 셔터 및 닫기 */}
+                            <div style={{position:'absolute', top:0, bottom:0, right:0, width:100, background:'rgba(0,0,0,0.5)', zIndex:20, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'space-between', padding:'30px 0'}}>
+                                <button onClick={stopCamera} className="text-white text-3xl active:scale-90"><i className="fa-solid fa-xmark"></i></button>
+                                <div onClick={handleShutter} className="shadow-2xl active:scale-95" style={{width:70, height:70, border:'5px solid #fff', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer'}}>
+                                    <div style={{background:'#FF8C00', width:54, height:54, borderRadius:'50%'}}></div>
+                                </div>
+                                <div style={{height: 30}}></div>
                             </div>
                         </div>
                     )}
 
+                    {/* === 메인(갤러리) 모드 === */}
                     <div className={`flex flex-col h-full ${view !== 'main' ? 'view-hidden' : ''}`}>
                         <div className="pt-8 px-4 pb-2 flex justify-between items-end bg-[#2D2D2D] z-[200]">
                             <h1 className="text-sm font-black italic text-[#FFD700] tracking-tighter">DRIVE SHOOT</h1>
@@ -559,28 +646,34 @@
                             </div>
                         </div>
 
-                        {/* 작업 영역 컨테이너 (비율 동기화) */}
+                        {/* 작업 영역 (갤러리 뷰도 비율 동기화, 절대 짤림 방지 로직 적용) */}
                         <div className="workspace-area" onClick={() => images.length === 0 && !cameraMode && fileInputRef.current.click()}>
                             {images.length > 0 ? (
-                                <div style={{flex:1, position:'relative', display:'flex', alignItems:'center', justifyContent:'center'}}>
-                                    {/* 이 박스가 최종 출력 해상도와 동일한 비율을 가짐 */}
-                                    <div ref={captureContainerRef} style={{position:'relative', width:'100%', maxHeight:'100%', aspectRatio: aspectRatio.replace(':', '/'), overflow:'hidden'}}>
+                                <div style={{flex:1, position:'relative', display:'flex', alignItems:'center', justifyContent:'center', minHeight: 0, minWidth: 0, padding: '10px'}}>
+                                    {/* 이 박스가 최종 출력 해상도와 100% 동일한 비율을 강제 유지 (짤림 차단) */}
+                                    <div ref={captureContainerRef} style={{
+                                        position:'relative', 
+                                        width: '10000px', 
+                                        maxWidth: '100%', 
+                                        maxHeight: '100%', 
+                                        aspectRatio: getPreviewRatio(), 
+                                        boxShadow: '0 0 0 1px rgba(255,255,255,0.2)'
+                                    }}>
                                         <img src={images[0]} style={{width:'100%', height:'100%', objectFit:'cover'}} />
                                         <div className={`overlay-board ${boardPos}`} style={{ transform: `scale(${boardScale})`, transformOrigin: boardPos === 'pos-tl' ? 'top left' : boardPos === 'pos-tr' ? 'top right' : boardPos === 'pos-bl' ? 'bottom left' : 'bottom right', position: 'absolute', zIndex: 10 }}>
                                             {fields.slice(0, 10).map(f => ( <div key={f.id} className="overlay-row"><div className="overlay-label">{f.label}</div><div className="overlay-value">{f.value}</div></div> ))}
                                         </div>
                                         {/* 포인터 */}
                                         {!isCapturing && ['tl','tr','bl','br'].map(p => boardPos !== 'pos-'+p && (
-                                            <div key={p} className="pos-square" style={{position:'absolute', [p[0]==='t'?'top':'bottom']:'10px', [p[1]==='l'?'left':'right']:'10px', zIndex:30}} onClick={(e)=>{e.stopPropagation(); setBoardPos('pos-'+p);}}><i className="fa-solid fa-expand text-xl"></i></div>
+                                            <div key={p} className="pos-square" style={{position:'absolute', top: p[0]==='t'?'10px':'auto', bottom: p[0]==='b'?'10px':'auto', left: p[1]==='l'?'10px':'auto', right: p[1]==='r'?'10px':'auto', zIndex:30}} onClick={(e)=>{e.stopPropagation(); setBoardPos('pos-'+p);}}><i className="fa-solid fa-expand text-xl"></i></div>
                                         ))}
-                                        {/* 중앙 새로고침 안내 */}
-                                        {!isCapturing && (
-                                            <div style={{position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:20}} onClick={(e)=>{ e.stopPropagation(); setImages([]); fileInputRef.current.click(); }}>
-                                                <i className="fa-solid fa-arrows-rotate text-white text-3xl opacity-50"></i>
-                                                <p style={{color: '#FFD700', fontWeight:700, fontSize:10, marginTop:12, textAlign:'center', opacity:0.5, textShadow:'0 2px 4px rgba(0,0,0,1)'}}>중앙 터치 시 이미지 변경</p>
-                                            </div>
-                                        )}
                                     </div>
+                                    {!isCapturing && (
+                                        <div style={{position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:20, pointerEvents: 'none'}}>
+                                            <i className="fa-solid fa-arrows-rotate text-white text-3xl opacity-30"></i>
+                                            <p style={{color: '#FFD700', fontWeight:700, fontSize:10, marginTop:12, textAlign:'center', opacity:0.5, textShadow:'0 2px 4px rgba(0,0,0,1)'}}>터치하여 이미지 변경</p>
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="flex-1 flex flex-col items-center justify-center text-slate-500 gap-4">
